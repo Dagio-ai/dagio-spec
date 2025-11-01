@@ -1,6 +1,6 @@
 # <component-name> - Component Diagram
 
-> <small>[Architecture Overview](../../../architecture_overview.md) > [Containers Overview](../../../c2_containers/containers_overview.md) > [<container-name> - Container Diagram](../../../c2_containers/<container-name>/container_diagram.md) > [Components Overview](../components_overview.md) > <strong><component-name> - Component Diagram</strong></small>
+> <small>[Architecture Overview](../../../architecture_overview.md) > [Containers Overview](../../../c2_containers/containers_overview.md) > [<container-name>](../../../c2_containers/<container-name>/container_diagram.md) > [Components Overview](../components_overview.md) > <strong><component-name> - Component Diagram</strong></small>
 
 _Replace `<container-name>` and `<component-name>` with the appropriate identifiers._
 
@@ -55,3 +55,7 @@ Tailor participants to real classes/functions and highlight parallel or error pa
 - Cite key modules/files touched by this component.
 - List risks, TODOs, or open design questions.
 - Reference tests/metrics that cover the component (include security testing where applicable).
+
+## Linked Code Structure
+- Link to the corresponding `c4_code/<component-slug>/code_structure.md` file for this component and a brief description of its organization outside the link.
+- If multiple code-structure files exist, enumerate them here and ensure the list stays in sync with the code directory.

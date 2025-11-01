@@ -10,11 +10,12 @@ Use this guidance to document the test strategy, coverage, and automation status
 - Note ownership (teams, squads) and gating policies for releases.
 
 ## Coverage Matrix
-| Tier / Suite | Purpose | Key Targets | Status | Notes |
-| --- | --- | --- | --- | --- |
-| _Unit_ | _Validate isolated functions/services._ | _Core libraries, pure functions._ | _In-progress_ | _Add missing coverage for billing calculators._ |
-| _Integration_ | _Exercise container/component boundaries._ | _API + DB, messaging bridges._ | _Planned_ | _Depends on local test harness refresh._ |
-| _End-to-End_ | _Validate user journeys and regression flows._ | _Checkout, onboarding._ | _Automated_ | _Nightly run; flake rate < 3%._ |
+Provide an exhaustive table covering every suite/layer you run. Duplicate rows as needed.
+
+| Suite / ID | Description | Layer (unit/integration/e2e/contract/load/etc.) | Owner / Team | Entry Points (commands, files, pipelines) | Pass Criteria | Current Status (pass/fail/blocked) | Coverage Focus (modules/features) | Known Gaps / Risks | Last Execution (timestamp/pipeline) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| _example: svc-orders-unit_ | Unit tests for order service domain logic. | Unit | Platform Core | `pytest ./src/orders/tests` | 100% pass, coverage >= 85% | Failing (2 tests) | Orders domain models, adapters | Missing tests for edge cases around refunds | 2025-01-15 (CI #1234) |
+| _example: api-gateway-contract_ | Provider/consumer tests for API gateway endpoints. | Contract | API Platform | `pnpm test:contract` | All contracts verified | Blocked (mock service down) | Checkout & billing endpoints | Waiting on billing mock fix | 2025-01-14 (CI #1230) |
 
 Replace rows with actual suites, tools, and status (pass/fail/blocked). Add more tiers (contract, visual regression, load) as needed.
 

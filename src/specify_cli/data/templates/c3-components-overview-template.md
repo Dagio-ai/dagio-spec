@@ -1,6 +1,6 @@
 # <container-name> - Components Overview
 
-> <small>[Architecture Overview](../../architecture_overview.md) > [Containers Overview](../../c2_containers/containers_overview.md) > [<container-name> - Container Diagram](../../c2_containers/<container-name>/container_diagram.md) > <strong><container-name> - Components Overview</strong></small>
+> <small>[Architecture Overview](../../architecture_overview.md) > [Containers Overview](../../c2_containers/containers_overview.md) > [<container-name>](../../c2_containers/<container-name>/container_diagram.md) > <strong>Components Overview</strong></small>
 
 _Replace `<container-name>` with the actual identifier for this container._
 

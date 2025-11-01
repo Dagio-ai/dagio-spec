@@ -1,6 +1,6 @@
 # <component-name> - Code Structure
 
-> <small>[Architecture Overview](../../architecture_overview.md) > [Containers Overview](../../c2_containers/containers_overview.md) > [<container-name> - Container Diagram](../../c2_containers/<container-name>/container_diagram.md) > [Components Overview](../../c3_components/<container-name>/components_overview.md) > [<component-name> - Component Diagram](../../c3_components/<container-name>/<component-name>/component_diagram.md) > <strong><component-name> - Code Structure</strong></small>
+> <small>[Architecture Overview](../../architecture_overview.md) > [Containers Overview](../../c2_containers/containers_overview.md) > [<container-name>](../../c2_containers/<container-name>/container_diagram.md) > [Components Overview](../../c3_components/<container-name>/components_overview.md) > [<component-name>](../../c3_components/<container-name>/<component-name>/component_diagram.md) > <strong>Code Structure</strong></small>
 
 _Replace `<container-name>` and `<component-name>` with the appropriate identifiers._
 

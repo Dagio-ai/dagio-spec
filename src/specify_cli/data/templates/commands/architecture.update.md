@@ -72,5 +72,5 @@ Clarify whether the user wants a full refresh or targeted updates (specific cont
 - `specs/architecture/architecture_logs.md` includes a new entry describing this update.
 - `architecture_overview.md` references the current `model_version`, includes a table of contents, and summarises changes.
 - All regenerated files are written using UTF-8 (no BOM).
-- `c7_tests/tests_overview.md` reflects the latest automation status and any required remediation work.
+- `c7_tests/tests_overview.md` reflects the latest automation status and maintains the exhaustive suite table (purpose, owners, commands, coverage, risks, last run).
 - Final response lists updated files, bumped versions, and next steps.

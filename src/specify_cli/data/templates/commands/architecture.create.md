@@ -84,5 +84,5 @@ If the user provided extra context, incorporate it into the analysis.
 - Architecture directory contains refreshed Markdown views that adhere to the guidance in `.specify/templates/c*-*-template.md` and the layout documented in `architecture_repository.md`.
 - Overview mirrors the generated views, calls out key characteristics, includes a table of contents, and references the JSON model.
 - All generated files are saved as UTF-8 (no BOM) to keep Mermaid diagrams and downstream tooling functioning correctly.
-- `c7_tests/tests_overview.md` documents the agreed testing strategy, coverage levels, and follow-up actions.
+- `c7_tests/tests_overview.md` contains a comprehensive, suite-by-suite table (as per the template) covering purpose, ownership, execution commands, coverage focus, known gaps, status, and last run.
 - Final response links to updated files and summarises key findings.

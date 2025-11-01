@@ -49,3 +49,7 @@ Add additional subgraphs (for example, `External Services`) or `style` directive
 - Data stores and external dependencies are connected with labelled relationships.
 - Notes capture reliability, performance, or compliance topics tied to each container.
 - Diagram uses subgraphs/spacing so nodes remain legible (no overlapping labels).
+
+## Linked Components
+- List each component belonging to this container and link to `../../c3_components/<container-slug>/<component-slug>/component_diagram.md` (use Markdown bullet links with the name of the component) and a brief description of the component's role outside the link.
+- Ensure the section stays in sync with the container inventory and components overview (no orphan links).
