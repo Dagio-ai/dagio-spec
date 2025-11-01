@@ -25,7 +25,7 @@ Clarify whether the user wants a full refresh or targeted updates (specific cont
 2. **Assess required updates**
    - Determine which parts of the architecture are affected (system-wide, container-level, component-level, or documentation-only updates).
    - For each impacted view, bump only the PATCH component (e.g., `1.0.2` -> `1.0.3`) to stay aligned with the `1.0.x` lifecycle.
-   - Decide whether the overall `model_version` also needs a bump. Follow the patch-only progression (`1.0.0`, `1.0.1`, … `1.0.99`) unless explicitly instructed otherwise.
+   - Decide whether the overall `model_version` also needs a bump. Follow the patch-only progression (`1.0.0`, `1.0.1`, ... `1.0.99`) unless explicitly instructed otherwise.
 
 3. **Update the architecture model**
    - Modify `architecture.json` first:
