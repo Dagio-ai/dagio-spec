@@ -6,37 +6,34 @@
 #     "rich",
 #     "platformdirs",
 #     "readchar",
-#     "httpx",
 # ]
 # ///
 """
 Specify CLI - Setup tool for Specify projects
 
 Usage:
-    uvx specify-cli.py init <project-name>
+    uvx specify-cli.py init
     uvx specify-cli.py init .
-    uvx specify-cli.py init --here
+    uvx specify-cli.py init path/to/workspace
+
 
 Or install globally:
     uv tool install --from specify-cli.py specify-cli
-    specify init <project-name>
-    specify init .
-    specify init --here
+    specify init
+    specify init path/to/workspace
 """
 
 import os
 import subprocess
 import sys
-import zipfile
-import tempfile
 import shutil
 import shlex
 import json
+import textwrap
 from pathlib import Path
 from typing import Optional, Tuple
 
 import typer
-import httpx
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -49,20 +46,6 @@ from typer.core import TyperGroup
 
 # For cross-platform keyboard input
 import readchar
-import ssl
-import truststore
-
-ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-client = httpx.Client(verify=ssl_context)
-
-def _github_token(cli_token: str | None = None) -> str | None:
-    """Return sanitized GitHub token (cli arg takes precedence) or None."""
-    return ((cli_token or os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN") or "").strip()) or None
-
-def _github_auth_headers(cli_token: str | None = None) -> dict:
-    """Return Authorization header dict only when a non-empty token exists."""
-    token = _github_token(cli_token)
-    return {"Authorization": f"Bearer {token}"} if token else {}
 
 # Agent configuration with name, folder, install URL, and CLI tool requirement
 AGENT_CONFIG = {
@@ -72,108 +55,197 @@ AGENT_CONFIG = {
         "install_url": None,  # IDE-based, no CLI check needed
         "requires_cli": False,
     },
+
     "claude": {
         "name": "Claude Code",
         "folder": ".claude/",
         "install_url": "https://docs.anthropic.com/en/docs/claude-code/setup",
         "requires_cli": True,
     },
+
     "gemini": {
         "name": "Gemini CLI",
         "folder": ".gemini/",
         "install_url": "https://github.com/google-gemini/gemini-cli",
         "requires_cli": True,
     },
+
     "cursor-agent": {
         "name": "Cursor",
         "folder": ".cursor/",
         "install_url": None,  # IDE-based
         "requires_cli": False,
     },
+
     "qwen": {
         "name": "Qwen Code",
         "folder": ".qwen/",
         "install_url": "https://github.com/QwenLM/qwen-code",
         "requires_cli": True,
     },
+
     "opencode": {
         "name": "opencode",
         "folder": ".opencode/",
         "install_url": "https://opencode.ai",
         "requires_cli": True,
     },
+
     "codex": {
         "name": "Codex CLI",
         "folder": ".codex/",
         "install_url": "https://github.com/openai/codex",
         "requires_cli": True,
     },
+
     "windsurf": {
         "name": "Windsurf",
         "folder": ".windsurf/",
         "install_url": None,  # IDE-based
         "requires_cli": False,
     },
+
     "kilocode": {
         "name": "Kilo Code",
         "folder": ".kilocode/",
         "install_url": None,  # IDE-based
         "requires_cli": False,
     },
+
     "auggie": {
         "name": "Auggie CLI",
         "folder": ".augment/",
         "install_url": "https://docs.augmentcode.com/cli/setup-auggie/install-auggie-cli",
         "requires_cli": True,
     },
+
     "codebuddy": {
         "name": "CodeBuddy",
         "folder": ".codebuddy/",
         "install_url": "https://www.codebuddy.ai/cli",
         "requires_cli": True,
     },
+
     "roo": {
         "name": "Roo Code",
         "folder": ".roo/",
         "install_url": None,  # IDE-based
         "requires_cli": False,
     },
+
     "q": {
         "name": "Amazon Q Developer CLI",
         "folder": ".amazonq/",
         "install_url": "https://aws.amazon.com/developer/learning/q-developer-cli/",
         "requires_cli": True,
     },
+
     "amp": {
         "name": "Amp",
         "folder": ".agents/",
         "install_url": "https://ampcode.com/manual#install",
         "requires_cli": True,
     },
+
 }
+
+
+ARCHITECTURE_TEMPLATE_FILES = [
+    "c1-system-context-template.md",
+    "c2-container-diagram-template.md",
+    "c3-component-diagram-template.md",
+    "c4-code-structure-template.md",
+    "c5-dynamic-view-template.md",
+    "c6-deployment-template.md",
+    "c7-tests-template.md",
+    "architecture_overview-template.md",
+    "architecture_logs-template.md",
+    "architecture-template.json",
+]
+
+
+ARCHITECTURE_DIRECTORY_OVERVIEW = textwrap.dedent(
+    """\
+    # Architecture Directory\n\n    This folder stores the artefacts produced by `/specify.architecture.create` and `/specify.architecture.update`.\n\n    ## Index Files\n    - `architecture_overview.md`: Entry point for the architecture documentation, including the table of contents linking to every view.\n    - `architecture_logs.md`: Versioned change log describing updates recorded in `architecture.json`.\n\n    ## Expected layout\n\n    ```\n    architecture/\n      c1_context/\n        system_context.md\n      c2_containers/\n        containers_overview.md\n        <container-slug>/\n          container_diagram.md\n      c3_components/\n        <container-slug>/\n          components_overview.md\n          <component-slug>/\n            component_diagram.md\n      c4_code/\n        <component-slug>/\n          code_structure.md\n      c5_dynamic_view/\n        view_diagram.md\n      c6_deployment/\n        deployment_diagram.md\n      c7_tests/\n        tests_overview.md\n      architecture_overview.md\n      architecture_logs.md\n      architecture.json\n    ```\n\n    The JSON model (`specs/architecture/architecture.json`) acts as the source of truth and drives the Markdown views. Treat any Markdown edits as projections that must be reconciled back into the JSON model.\n    """
+)
+
+
+ASSET_ENV_VAR = "SPECIFY_ASSETS_DIR"
+
+
+def _asset_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    env_dir = os.getenv(ASSET_ENV_VAR)
+
+    if env_dir:
+        candidates.append(Path(env_dir).expanduser())
+
+    module_dir = Path(__file__).resolve().parent
+    candidates.append(module_dir / "data")
+
+    try:
+        candidates.append(Path(__file__).resolve().parents[3])
+    except IndexError:
+        pass
+
+    return [path for path in candidates if path]
+
+
+def _asset_path(*parts: str) -> Path:
+
+    for base in _asset_candidates():
+        candidate = base.joinpath(*parts)
+
+        if candidate.exists():
+            return candidate
+
+    joined = Path(*parts)
+
+    raise FileNotFoundError(
+        f"Unable to locate asset '{joined}'. "
+        f"Set {ASSET_ENV_VAR} to override the asset directory."
+    )
+
+
+def _sync_directory(src: Path, dest: Path, *, exclude_dirs: set[str] | None = None, exclude_files: set[str] | None = None) -> None:
+
+    if not src.exists():
+        raise FileNotFoundError(f"Missing asset source directory: {src}")
+
+    dest.mkdir(parents=True, exist_ok=True)
+
+    for item in src.iterdir():
+        if item.is_dir():
+            if exclude_dirs and item.name in exclude_dirs:
+                continue
+
+            shutil.copytree(item, dest / item.name, dirs_exist_ok=True)
+
+        else:
+            if exclude_files and item.name in exclude_files:
+                continue
+
+            shutil.copy2(item, dest / item.name)
+
 
 SCRIPT_TYPE_CHOICES = {"sh": "POSIX Shell (bash/zsh)", "ps": "PowerShell"}
 
 CLAUDE_LOCAL_PATH = Path.home() / ".claude" / "local" / "claude"
 
-BANNER = """
-███████╗██████╗ ███████╗ ██████╗██╗███████╗██╗   ██╗
-██╔════╝██╔══██╗██╔════╝██╔════╝██║██╔════╝╚██╗ ██╔╝
-███████╗██████╔╝█████╗  ██║     ██║█████╗   ╚████╔╝ 
-╚════██║██╔═══╝ ██╔══╝  ██║     ██║██╔══╝    ╚██╔╝  
-███████║██║     ███████╗╚██████╗██║██║        ██║   
-╚══════╝╚═╝     ╚══════╝ ╚═════╝╚═╝╚═╝        ╚═╝   
-"""
-
+BANNER = ""
 TAGLINE = "GitHub Spec Kit - Spec-Driven Development Toolkit"
+
+
 class StepTracker:
     """Track and render hierarchical steps without emojis, similar to Claude Code tree output.
     Supports live auto-refresh via an attached refresh callback.
     """
+
     def __init__(self, title: str):
         self.title = title
         self.steps = []  # list of dicts: {key, label, status, detail}
-        self.status_order = {"pending": 0, "running": 1, "done": 2, "error": 3, "skipped": 4}
+        self.status_order = {"pending": 0, "running": 1,
+                             "done": 2, "error": 3, "skipped": 4}
         self._refresh_cb = None  # callable to trigger UI refresh
 
     def attach_refresh(self, cb):
@@ -181,7 +253,8 @@ class StepTracker:
 
     def add(self, key: str, label: str):
         if key not in [s["key"] for s in self.steps]:
-            self.steps.append({"key": key, "label": label, "status": "pending", "detail": ""})
+            self.steps.append({"key": key, "label": label,
+                              "status": "pending", "detail": ""})
             self._maybe_refresh()
 
     def start(self, key: str, detail: str = ""):
@@ -200,15 +273,19 @@ class StepTracker:
         for s in self.steps:
             if s["key"] == key:
                 s["status"] = status
+
                 if detail:
                     s["detail"] = detail
+
                 self._maybe_refresh()
                 return
 
-        self.steps.append({"key": key, "label": key, "status": status, "detail": detail})
+        self.steps.append(
+            {"key": key, "label": key, "status": status, "detail": detail})
         self._maybe_refresh()
 
     def _maybe_refresh(self):
+
         if self._refresh_cb:
             try:
                 self._refresh_cb()
@@ -223,40 +300,51 @@ class StepTracker:
 
             status = step["status"]
             if status == "done":
-                symbol = "[green]●[/green]"
+                symbol = "[green]OK[/green]"
+
             elif status == "pending":
-                symbol = "[green dim]○[/green dim]"
+                symbol = "[green dim]..[/green dim]"
+
             elif status == "running":
-                symbol = "[cyan]○[/cyan]"
+                symbol = "[cyan]>>[/cyan]"
+
             elif status == "error":
-                symbol = "[red]●[/red]"
+                symbol = "[red]!![/red]"
+
             elif status == "skipped":
-                symbol = "[yellow]○[/yellow]"
+                symbol = "[yellow]--[/yellow]"
+
             else:
                 symbol = " "
 
             if status == "pending":
                 # Entire line light gray (pending)
+
                 if detail_text:
                     line = f"{symbol} [bright_black]{label} ({detail_text})[/bright_black]"
+
                 else:
                     line = f"{symbol} [bright_black]{label}[/bright_black]"
+
             else:
                 # Label white, detail (if any) light gray in parentheses
                 if detail_text:
                     line = f"{symbol} [white]{label}[/white] [bright_black]({detail_text})[/bright_black]"
+
                 else:
                     line = f"{symbol} [white]{label}[/white]"
 
             tree.add(line)
+
         return tree
+
 
 def get_key():
     """Get a single keypress in a cross-platform way using readchar."""
     key = readchar.readkey()
-
     if key == readchar.key.UP or key == readchar.key.CTRL_P:
         return 'up'
+
     if key == readchar.key.DOWN or key == readchar.key.CTRL_N:
         return 'down'
 
@@ -271,21 +359,24 @@ def get_key():
 
     return key
 
+
 def select_with_arrows(options: dict, prompt_text: str = "Select an option", default_key: str = None) -> str:
     """
     Interactive selection using arrow keys with Rich Live display.
-    
+
+
     Args:
         options: Dict with keys as option keys and values as descriptions
         prompt_text: Text to show above the options
         default_key: Default option key to start with
-        
+
     Returns:
         Selected option key
     """
     option_keys = list(options.keys())
     if default_key and default_key in option_keys:
         selected_index = option_keys.index(default_key)
+
     else:
         selected_index = 0
 
@@ -296,15 +387,18 @@ def select_with_arrows(options: dict, prompt_text: str = "Select an option", def
         table = Table.grid(padding=(0, 2))
         table.add_column(style="cyan", justify="left", width=3)
         table.add_column(style="white", justify="left")
-
         for i, key in enumerate(option_keys):
             if i == selected_index:
-                table.add_row("▶", f"[cyan]{key}[/cyan] [dim]({options[key]})[/dim]")
+                table.add_row(
+                    "->", f"[cyan]{key}[/cyan] [dim]({options[key]})[/dim]")
+
             else:
-                table.add_row(" ", f"[cyan]{key}[/cyan] [dim]({options[key]})[/dim]")
+                table.add_row(
+                    " ", f"[cyan]{key}[/cyan] [dim]({options[key]})[/dim]")
 
         table.add_row("", "")
-        table.add_row("", "[dim]Use ↑/↓ to navigate, Enter to select, Esc to cancel[/dim]")
+        table.add_row(
+            "", "[dim]Use Up/Down arrows to navigate, Enter to select, Esc to cancel[/dim]")
 
         return Panel(
             table,
@@ -322,12 +416,17 @@ def select_with_arrows(options: dict, prompt_text: str = "Select an option", def
                 try:
                     key = get_key()
                     if key == 'up':
-                        selected_index = (selected_index - 1) % len(option_keys)
+                        selected_index = (
+                            selected_index - 1) % len(option_keys)
+
                     elif key == 'down':
-                        selected_index = (selected_index + 1) % len(option_keys)
+                        selected_index = (
+                            selected_index + 1) % len(option_keys)
+
                     elif key == 'enter':
                         selected_key = option_keys[selected_index]
                         break
+
                     elif key == 'escape':
                         console.print("\n[yellow]Selection cancelled[/yellow]")
                         raise typer.Exit(1)
@@ -346,7 +445,9 @@ def select_with_arrows(options: dict, prompt_text: str = "Select an option", def
 
     return selected_key
 
+
 console = Console()
+
 
 class BannerGroup(TyperGroup):
     """Custom group that shows banner before help."""
@@ -365,12 +466,14 @@ app = typer.Typer(
     cls=BannerGroup,
 )
 
+
 def show_banner():
     """Display the ASCII art banner."""
     banner_lines = BANNER.strip().split('\n')
-    colors = ["bright_blue", "blue", "cyan", "bright_cyan", "white", "bright_white"]
-
+    colors = ["bright_blue", "blue", "cyan",
+              "bright_cyan", "white", "bright_white"]
     styled_banner = Text()
+
     for i, line in enumerate(banner_lines):
         color = colors[i % len(colors)]
         styled_banner.append(line + "\n", style=color)
@@ -379,440 +482,687 @@ def show_banner():
     console.print(Align.center(Text(TAGLINE, style="italic bright_yellow")))
     console.print()
 
+
 @app.callback()
 def callback(ctx: typer.Context):
     """Show banner when no subcommand is provided."""
+
     if ctx.invoked_subcommand is None and "--help" not in sys.argv and "-h" not in sys.argv:
+
         show_banner()
-        console.print(Align.center("[dim]Run 'specify --help' for usage information[/dim]"))
+
+        console.print(Align.center(
+            "[dim]Run 'specify --help' for usage information[/dim]"))
+
         console.print()
+
 
 def run_command(cmd: list[str], check_return: bool = True, capture: bool = False, shell: bool = False) -> Optional[str]:
     """Run a shell command and optionally capture output."""
+
     try:
+
         if capture:
-            result = subprocess.run(cmd, check=check_return, capture_output=True, text=True, shell=shell)
+
+            result = subprocess.run(
+                cmd, check=check_return, capture_output=True, text=True, shell=shell)
+
             return result.stdout.strip()
+
         else:
+
             subprocess.run(cmd, check=check_return, shell=shell)
+
             return None
+
     except subprocess.CalledProcessError as e:
+
         if check_return:
+
             console.print(f"[red]Error running command:[/red] {' '.join(cmd)}")
+
             console.print(f"[red]Exit code:[/red] {e.returncode}")
+
             if hasattr(e, 'stderr') and e.stderr:
+
                 console.print(f"[red]Error output:[/red] {e.stderr}")
+
             raise
+
         return None
+
 
 def check_tool(tool: str, tracker: StepTracker = None) -> bool:
     """Check if a tool is installed. Optionally update tracker.
-    
+
+
+
     Args:
+
         tool: Name of the tool to check
+
         tracker: Optional StepTracker to update with results
-        
+
+
+
     Returns:
+
         True if tool is found, False otherwise
+
     """
+
     # Special handling for Claude CLI after `claude migrate-installer`
+
     # See: https://github.com/github/spec-kit/issues/123
+
     # The migrate-installer command REMOVES the original executable from PATH
+
     # and creates an alias at ~/.claude/local/claude instead
+
     # This path should be prioritized over other claude executables in PATH
+
     if tool == "claude":
+
         if CLAUDE_LOCAL_PATH.exists() and CLAUDE_LOCAL_PATH.is_file():
+
             if tracker:
+
                 tracker.complete(tool, "available")
+
             return True
-    
+
     found = shutil.which(tool) is not None
-    
+
     if tracker:
+
         if found:
+
             tracker.complete(tool, "available")
+
         else:
+
             tracker.error(tool, "not found")
-    
+
     return found
 
-def is_git_repo(path: Path = None) -> bool:
-    """Check if the specified path is inside a git repository."""
-    if path is None:
-        path = Path.cwd()
-    
-    if not path.is_dir():
-        return False
-
-    try:
-        # Use git command to check if inside a work tree
-        subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            check=True,
-            capture_output=True,
-            cwd=path,
-        )
-        return True
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return False
-
-def init_git_repo(project_path: Path, quiet: bool = False) -> Tuple[bool, Optional[str]]:
-    """Initialize a git repository in the specified path.
-    
-    Args:
-        project_path: Path to initialize git repository in
-        quiet: if True suppress console output (tracker handles status)
-    
-    Returns:
-        Tuple of (success: bool, error_message: Optional[str])
-    """
-    try:
-        original_cwd = Path.cwd()
-        os.chdir(project_path)
-        if not quiet:
-            console.print("[cyan]Initializing git repository...[/cyan]")
-        subprocess.run(["git", "init"], check=True, capture_output=True, text=True)
-        subprocess.run(["git", "add", "."], check=True, capture_output=True, text=True)
-        subprocess.run(["git", "commit", "-m", "Initial commit from Specify template"], check=True, capture_output=True, text=True)
-        if not quiet:
-            console.print("[green]✓[/green] Git repository initialized")
-        return True, None
-
-    except subprocess.CalledProcessError as e:
-        error_msg = f"Command: {' '.join(e.cmd)}\nExit code: {e.returncode}"
-        if e.stderr:
-            error_msg += f"\nError: {e.stderr.strip()}"
-        elif e.stdout:
-            error_msg += f"\nOutput: {e.stdout.strip()}"
-        
-        if not quiet:
-            console.print(f"[red]Error initializing git repository:[/red] {e}")
-        return False, error_msg
-    finally:
-        os.chdir(original_cwd)
 
 def handle_vscode_settings(sub_item, dest_file, rel_path, verbose=False, tracker=None) -> None:
     """Handle merging or copying of .vscode/settings.json files."""
+
     def log(message, color="green"):
+
         if verbose and not tracker:
+
             console.print(f"[{color}]{message}[/] {rel_path}")
 
     try:
+
         with open(sub_item, 'r', encoding='utf-8') as f:
+
             new_settings = json.load(f)
 
         if dest_file.exists():
-            merged = merge_json_files(dest_file, new_settings, verbose=verbose and not tracker)
+
+            merged = merge_json_files(
+                dest_file, new_settings, verbose=verbose and not tracker)
+
             with open(dest_file, 'w', encoding='utf-8') as f:
+
                 json.dump(merged, f, indent=4)
+
                 f.write('\n')
+
             log("Merged:", "green")
+
         else:
+
             shutil.copy2(sub_item, dest_file)
+
             log("Copied (no existing settings.json):", "blue")
 
     except Exception as e:
+
         log(f"Warning: Could not merge, copying instead: {e}", "yellow")
+
         shutil.copy2(sub_item, dest_file)
+
 
 def merge_json_files(existing_path: Path, new_content: dict, verbose: bool = False) -> dict:
     """Merge new JSON content into existing JSON file.
 
+
+
     Performs a deep merge where:
+
     - New keys are added
+
     - Existing keys are preserved unless overwritten by new content
+
     - Nested dictionaries are merged recursively
+
     - Lists and other values are replaced (not merged)
 
+
+
     Args:
+
         existing_path: Path to existing JSON file
+
         new_content: New JSON content to merge in
+
         verbose: Whether to print merge details
 
+
+
     Returns:
+
         Merged JSON content as dict
+
     """
+
     try:
+
         with open(existing_path, 'r', encoding='utf-8') as f:
+
             existing_content = json.load(f)
+
     except (FileNotFoundError, json.JSONDecodeError):
+
         # If file doesn't exist or is invalid, just use new content
+
         return new_content
 
     def deep_merge(base: dict, update: dict) -> dict:
         """Recursively merge update dict into base dict."""
+
         result = base.copy()
+
         for key, value in update.items():
+
             if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+
                 # Recursively merge nested dictionaries
+
                 result[key] = deep_merge(result[key], value)
+
             else:
+
                 # Add new key or replace existing value
+
                 result[key] = value
+
         return result
 
     merged = deep_merge(existing_content, new_content)
 
     if verbose:
+
         console.print(f"[cyan]Merged JSON file:[/cyan] {existing_path.name}")
 
     return merged
 
-def download_template_from_github(ai_assistant: str, download_dir: Path, *, script_type: str = "sh", verbose: bool = True, show_progress: bool = True, client: httpx.Client = None, debug: bool = False, github_token: str = None) -> Tuple[Path, dict]:
-    repo_owner = "github"
-    repo_name = "spec-kit"
-    if client is None:
-        client = httpx.Client(verify=ssl_context)
-
     if verbose:
+
         console.print("[cyan]Fetching latest release information...[/cyan]")
+
     api_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/releases/latest"
 
     try:
+
         response = client.get(
+
             api_url,
+
             timeout=30,
+
             follow_redirects=True,
+
             headers=_github_auth_headers(github_token),
+
         )
+
         status = response.status_code
+
         if status != 200:
+
             msg = f"GitHub API returned {status} for {api_url}"
+
             if debug:
+
                 msg += f"\nResponse headers: {response.headers}\nBody (truncated 500): {response.text[:500]}"
+
             raise RuntimeError(msg)
+
         try:
+
             release_data = response.json()
+
         except ValueError as je:
-            raise RuntimeError(f"Failed to parse release JSON: {je}\nRaw (truncated 400): {response.text[:400]}")
+
+            raise RuntimeError(
+                f"Failed to parse release JSON: {je}\nRaw (truncated 400): {response.text[:400]}")
+
     except Exception as e:
+
         console.print(f"[red]Error fetching release information[/red]")
+
         console.print(Panel(str(e), title="Fetch Error", border_style="red"))
+
         raise typer.Exit(1)
 
     assets = release_data.get("assets", [])
+
     pattern = f"spec-kit-template-{ai_assistant}-{script_type}"
+
     matching_assets = [
+
         asset for asset in assets
+
         if pattern in asset["name"] and asset["name"].endswith(".zip")
+
     ]
 
     asset = matching_assets[0] if matching_assets else None
 
     if asset is None:
-        console.print(f"[red]No matching release asset found[/red] for [bold]{ai_assistant}[/bold] (expected pattern: [bold]{pattern}[/bold])")
+
+        console.print(
+            f"[red]No matching release asset found[/red] for [bold]{ai_assistant}[/bold] (expected pattern: [bold]{pattern}[/bold])")
+
         asset_names = [a.get('name', '?') for a in assets]
-        console.print(Panel("\n".join(asset_names) or "(no assets)", title="Available Assets", border_style="yellow"))
+
+        console.print(Panel("\n".join(asset_names) or "(no assets)",
+                      title="Available Assets", border_style="yellow"))
+
         raise typer.Exit(1)
 
     download_url = asset["browser_download_url"]
+
     filename = asset["name"]
+
     file_size = asset["size"]
 
     if verbose:
+
         console.print(f"[cyan]Found template:[/cyan] {filename}")
+
         console.print(f"[cyan]Size:[/cyan] {file_size:,} bytes")
+
         console.print(f"[cyan]Release:[/cyan] {release_data['tag_name']}")
 
     zip_path = download_dir / filename
+
     if verbose:
+
         console.print(f"[cyan]Downloading template...[/cyan]")
 
     try:
+
         with client.stream(
+
             "GET",
+
             download_url,
+
             timeout=60,
+
             follow_redirects=True,
+
             headers=_github_auth_headers(github_token),
+
         ) as response:
+
             if response.status_code != 200:
+
                 body_sample = response.text[:400]
-                raise RuntimeError(f"Download failed with {response.status_code}\nHeaders: {response.headers}\nBody (truncated): {body_sample}")
+
+                raise RuntimeError(
+                    f"Download failed with {response.status_code}\nHeaders: {response.headers}\nBody (truncated): {body_sample}")
+
             total_size = int(response.headers.get('content-length', 0))
+
             with open(zip_path, 'wb') as f:
+
                 if total_size == 0:
+
                     for chunk in response.iter_bytes(chunk_size=8192):
+
                         f.write(chunk)
+
                 else:
+
                     if show_progress:
+
                         with Progress(
+
                             SpinnerColumn(),
-                            TextColumn("[progress.description]{task.description}"),
-                            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+
+                            TextColumn(
+                                "[progress.description]{task.description}"),
+
+                            TextColumn(
+                                "[progress.percentage]{task.percentage:>3.0f}%"),
+
                             console=console,
+
                         ) as progress:
-                            task = progress.add_task("Downloading...", total=total_size)
+
+                            task = progress.add_task(
+                                "Downloading...", total=total_size)
+
                             downloaded = 0
+
                             for chunk in response.iter_bytes(chunk_size=8192):
+
                                 f.write(chunk)
+
                                 downloaded += len(chunk)
+
                                 progress.update(task, completed=downloaded)
+
                     else:
+
                         for chunk in response.iter_bytes(chunk_size=8192):
+
                             f.write(chunk)
+
     except Exception as e:
+
         console.print(f"[red]Error downloading template[/red]")
+
         detail = str(e)
+
         if zip_path.exists():
+
             zip_path.unlink()
-        console.print(Panel(detail, title="Download Error", border_style="red"))
+
+        console.print(
+            Panel(detail, title="Download Error", border_style="red"))
+
         raise typer.Exit(1)
+
     if verbose:
+
         console.print(f"Downloaded: {filename}")
+
     metadata = {
+
         "filename": filename,
+
         "size": file_size,
+
         "release": release_data["tag_name"],
+
         "asset_url": download_url
+
     }
+
     return zip_path, metadata
 
-def download_and_extract_template(project_path: Path, ai_assistant: str, script_type: str, is_current_dir: bool = False, *, verbose: bool = True, tracker: StepTracker | None = None, client: httpx.Client = None, debug: bool = False, github_token: str = None) -> Path:
-    """Download the latest release and extract it to create a new project.
-    Returns project_path. Uses tracker if provided (with keys: fetch, download, extract, cleanup)
-    """
-    current_dir = Path.cwd()
-
     if tracker:
+
         tracker.start("fetch", "contacting GitHub API")
+
     try:
+
         zip_path, meta = download_template_from_github(
+
             ai_assistant,
+
             current_dir,
+
             script_type=script_type,
+
             verbose=verbose and tracker is None,
+
             show_progress=(tracker is None),
+
             client=client,
+
             debug=debug,
+
             github_token=github_token
+
         )
+
         if tracker:
-            tracker.complete("fetch", f"release {meta['release']} ({meta['size']:,} bytes)")
+
+            tracker.complete(
+                "fetch", f"release {meta['release']} ({meta['size']:,} bytes)")
+
             tracker.add("download", "Download template")
+
             tracker.complete("download", meta['filename'])
+
     except Exception as e:
+
         if tracker:
+
             tracker.error("fetch", str(e))
+
         else:
+
             if verbose:
+
                 console.print(f"[red]Error downloading template:[/red] {e}")
+
         raise
 
     if tracker:
+
         tracker.add("extract", "Extract template")
+
         tracker.start("extract")
+
     elif verbose:
+
         console.print("Extracting template...")
 
     try:
+
         if not is_current_dir:
+
             project_path.mkdir(parents=True)
 
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+
             zip_contents = zip_ref.namelist()
+
             if tracker:
+
                 tracker.start("zip-list")
+
                 tracker.complete("zip-list", f"{len(zip_contents)} entries")
+
             elif verbose:
-                console.print(f"[cyan]ZIP contains {len(zip_contents)} items[/cyan]")
+
+                console.print(
+                    f"[cyan]ZIP contains {len(zip_contents)} items[/cyan]")
 
             if is_current_dir:
+
                 with tempfile.TemporaryDirectory() as temp_dir:
+
                     temp_path = Path(temp_dir)
+
                     zip_ref.extractall(temp_path)
 
                     extracted_items = list(temp_path.iterdir())
+
                     if tracker:
+
                         tracker.start("extracted-summary")
-                        tracker.complete("extracted-summary", f"temp {len(extracted_items)} items")
+
+                        tracker.complete("extracted-summary",
+                                         f"temp {len(extracted_items)} items")
+
                     elif verbose:
-                        console.print(f"[cyan]Extracted {len(extracted_items)} items to temp location[/cyan]")
+
+                        console.print(
+                            f"[cyan]Extracted {len(extracted_items)} items to temp location[/cyan]")
 
                     source_dir = temp_path
+
                     if len(extracted_items) == 1 and extracted_items[0].is_dir():
+
                         source_dir = extracted_items[0]
+
                         if tracker:
+
                             tracker.add("flatten", "Flatten nested directory")
+
                             tracker.complete("flatten")
+
                         elif verbose:
-                            console.print(f"[cyan]Found nested directory structure[/cyan]")
+
+                            console.print(
+                                f"[cyan]Found nested directory structure[/cyan]")
 
                     for item in source_dir.iterdir():
+
                         dest_path = project_path / item.name
+
                         if item.is_dir():
+
                             if dest_path.exists():
+
                                 if verbose and not tracker:
-                                    console.print(f"[yellow]Merging directory:[/yellow] {item.name}")
+
+                                    console.print(
+                                        f"[yellow]Merging directory:[/yellow] {item.name}")
+
                                 for sub_item in item.rglob('*'):
+
                                     if sub_item.is_file():
+
                                         rel_path = sub_item.relative_to(item)
+
                                         dest_file = dest_path / rel_path
-                                        dest_file.parent.mkdir(parents=True, exist_ok=True)
+
+                                        dest_file.parent.mkdir(
+                                            parents=True, exist_ok=True)
+
                                         # Special handling for .vscode/settings.json - merge instead of overwrite
+
                                         if dest_file.name == "settings.json" and dest_file.parent.name == ".vscode":
-                                            handle_vscode_settings(sub_item, dest_file, rel_path, verbose, tracker)
+
+                                            handle_vscode_settings(
+                                                sub_item, dest_file, rel_path, verbose, tracker)
+
                                         else:
+
                                             shutil.copy2(sub_item, dest_file)
+
                             else:
+
                                 shutil.copytree(item, dest_path)
+
                         else:
+
                             if dest_path.exists() and verbose and not tracker:
-                                console.print(f"[yellow]Overwriting file:[/yellow] {item.name}")
+
+                                console.print(
+                                    f"[yellow]Overwriting file:[/yellow] {item.name}")
+
                             shutil.copy2(item, dest_path)
+
                     if verbose and not tracker:
-                        console.print(f"[cyan]Template files merged into current directory[/cyan]")
+
+                        console.print(
+                            f"[cyan]Template files merged into current directory[/cyan]")
+
             else:
+
                 zip_ref.extractall(project_path)
 
                 extracted_items = list(project_path.iterdir())
+
                 if tracker:
+
                     tracker.start("extracted-summary")
-                    tracker.complete("extracted-summary", f"{len(extracted_items)} top-level items")
+
+                    tracker.complete("extracted-summary",
+                                     f"{len(extracted_items)} top-level items")
+
                 elif verbose:
-                    console.print(f"[cyan]Extracted {len(extracted_items)} items to {project_path}:[/cyan]")
+
+                    console.print(
+                        f"[cyan]Extracted {len(extracted_items)} items to {project_path}:[/cyan]")
+
                     for item in extracted_items:
-                        console.print(f"  - {item.name} ({'dir' if item.is_dir() else 'file'})")
+
+                        console.print(
+                            f"  - {item.name} ({'dir' if item.is_dir() else 'file'})")
 
                 if len(extracted_items) == 1 and extracted_items[0].is_dir():
+
                     nested_dir = extracted_items[0]
-                    temp_move_dir = project_path.parent / f"{project_path.name}_temp"
+
+                    temp_move_dir = project_path.parent / \
+                        f"{project_path.name}_temp"
 
                     shutil.move(str(nested_dir), str(temp_move_dir))
 
                     project_path.rmdir()
 
                     shutil.move(str(temp_move_dir), str(project_path))
+
                     if tracker:
+
                         tracker.add("flatten", "Flatten nested directory")
+
                         tracker.complete("flatten")
+
                     elif verbose:
-                        console.print(f"[cyan]Flattened nested directory structure[/cyan]")
+
+                        console.print(
+                            f"[cyan]Flattened nested directory structure[/cyan]")
 
     except Exception as e:
+
         if tracker:
+
             tracker.error("extract", str(e))
+
         else:
+
             if verbose:
+
                 console.print(f"[red]Error extracting template:[/red] {e}")
+
                 if debug:
-                    console.print(Panel(str(e), title="Extraction Error", border_style="red"))
+
+                    console.print(
+                        Panel(str(e), title="Extraction Error", border_style="red"))
 
         if not is_current_dir and project_path.exists():
+
             shutil.rmtree(project_path)
+
         raise typer.Exit(1)
+
     else:
+
         if tracker:
+
             tracker.complete("extract")
+
     finally:
+
         if tracker:
+
             tracker.add("cleanup", "Remove temporary archive")
 
         if zip_path.exists():
+
             zip_path.unlink()
+
             if tracker:
+
                 tracker.complete("cleanup")
+
             elif verbose:
+
                 console.print(f"Cleaned up: {zip_path.name}")
 
     return project_path
@@ -820,391 +1170,982 @@ def download_and_extract_template(project_path: Path, ai_assistant: str, script_
 
 def ensure_executable_scripts(project_path: Path, tracker: StepTracker | None = None) -> None:
     """Ensure POSIX .sh scripts under .specify/scripts (recursively) have execute bits (no-op on Windows)."""
+
     if os.name == "nt":
+
         return  # Windows: skip silently
+
     scripts_root = project_path / ".specify" / "scripts"
+
     if not scripts_root.is_dir():
+
         return
+
     failures: list[str] = []
+
     updated = 0
+
     for script in scripts_root.rglob("*.sh"):
+
         try:
+
             if script.is_symlink() or not script.is_file():
+
                 continue
+
             try:
+
                 with script.open("rb") as f:
+
                     if f.read(2) != b"#!":
+
                         continue
+
             except Exception:
+
                 continue
-            st = script.stat(); mode = st.st_mode
+
+            st = script.stat()
+            mode = st.st_mode
+
             if mode & 0o111:
+
                 continue
+
             new_mode = mode
-            if mode & 0o400: new_mode |= 0o100
-            if mode & 0o040: new_mode |= 0o010
-            if mode & 0o004: new_mode |= 0o001
-            if not (new_mode & 0o100):
+
+            if mode & 0o400:
                 new_mode |= 0o100
+
+            if mode & 0o040:
+                new_mode |= 0o010
+
+            if mode & 0o004:
+                new_mode |= 0o001
+
+            if not (new_mode & 0o100):
+
+                new_mode |= 0o100
+
             os.chmod(script, new_mode)
+
             updated += 1
+
         except Exception as e:
+
             failures.append(f"{script.relative_to(scripts_root)}: {e}")
+
     if tracker:
-        detail = f"{updated} updated" + (f", {len(failures)} failed" if failures else "")
+
+        detail = f"{updated} updated" + \
+            (f", {len(failures)} failed" if failures else "")
+
         tracker.add("chmod", "Set script permissions recursively")
+
         (tracker.error if failures else tracker.complete)("chmod", detail)
+
     else:
+
         if updated:
-            console.print(f"[cyan]Updated execute permissions on {updated} script(s) recursively[/cyan]")
+
+            console.print(
+                f"[cyan]Updated execute permissions on {updated} script(s) recursively[/cyan]")
+
         if failures:
-            console.print("[yellow]Some scripts could not be updated:[/yellow]")
+
+            console.print(
+                "[yellow]Some scripts could not be updated:[/yellow]")
+
             for f in failures:
+
                 console.print(f"  - {f}")
+
 
 @app.command()
 def init(
-    project_name: str = typer.Argument(None, help="Name for your new project directory (optional if using --here, or use '.' for current directory)"),
-    ai_assistant: str = typer.Option(None, "--ai", help="AI assistant to use: claude, gemini, copilot, cursor-agent, qwen, opencode, codex, windsurf, kilocode, auggie, codebuddy, amp, or q"),
-    script_type: str = typer.Option(None, "--script", help="Script type to use: sh or ps"),
-    ignore_agent_tools: bool = typer.Option(False, "--ignore-agent-tools", help="Skip checks for AI agent tools like Claude Code"),
-    no_git: bool = typer.Option(False, "--no-git", help="Skip git repository initialization"),
-    here: bool = typer.Option(False, "--here", help="Initialize project in the current directory instead of creating a new one"),
-    force: bool = typer.Option(False, "--force", help="Force merge/overwrite when using --here (skip confirmation)"),
-    skip_tls: bool = typer.Option(False, "--skip-tls", help="Skip SSL/TLS verification (not recommended)"),
-    debug: bool = typer.Option(False, "--debug", help="Show verbose diagnostic output for network and extraction failures"),
-    github_token: str = typer.Option(None, "--github-token", help="GitHub token to use for API requests (or set GH_TOKEN or GITHUB_TOKEN environment variable)"),
+
+    target: str = typer.Argument(
+        '.', help="Existing workspace directory (use '.' for current directory)"),
+
+    ai_assistant: str = typer.Option(
+        None, '--ai', help="AI assistant to use: claude, gemini, copilot, cursor-agent, qwen, opencode, codex, windsurf, kilocode, auggie, codebuddy, amp, roo, or q"),
+
+    script_type: str = typer.Option(
+        None, '--script', help="Script type to use: sh or ps"),
+
+    ignore_agent_tools: bool = typer.Option(
+        False, '--ignore-agent-tools', help="Skip checks for AI agent tools like Claude Code"),
+
+    force: bool = typer.Option(
+        False, '--force', help="Overwrite existing Specify assets without confirmation"),
+
+    debug: bool = typer.Option(
+        False, '--debug', help="Show verbose diagnostic output for troubleshooting"),
+
 ):
-    """
-    Initialize a new Specify project from the latest template.
-    
+    '''Prepare Spec Kit assets within an existing workspace.
+
+
+
     This command will:
-    1. Check that required tools are installed (git is optional)
-    2. Let you choose your AI assistant
-    3. Download the appropriate template from GitHub
-    4. Extract the template to a new project directory or current directory
-    5. Initialize a fresh git repository (if not --no-git and no existing repo)
-    6. Optionally set up AI assistant commands
-    
-    Examples:
-        specify init my-project
-        specify init my-project --ai claude
-        specify init my-project --ai copilot --no-git
-        specify init --ignore-agent-tools my-project
-        specify init . --ai claude         # Initialize in current directory
-        specify init .                     # Initialize in current directory (interactive AI selection)
-        specify init --here --ai claude    # Alternative syntax for current directory
-        specify init --here --ai codex
-        specify init --here --ai codebuddy
-        specify init --here
-        specify init --here --force  # Skip confirmation when current directory not empty
-    """
+
+    1. Let you choose your AI assistant
+
+    2. Copy templates, memory, and scripts into the workspace
+
+    3. Generate agent-specific commands locally
+
+    4. Ensure architecture scaffolding is available under specs/
+
+    '''
 
     show_banner()
 
-    if project_name == ".":
-        here = True
-        project_name = None  # Clear project_name to use existing validation logic
+    project_path = Path(target).resolve()
 
-    if here and project_name:
-        console.print("[red]Error:[/red] Cannot specify both project name and --here flag")
-        raise typer.Exit(1)
+    if not project_path.exists():
 
-    if not here and not project_name:
-        console.print("[red]Error:[/red] Must specify either a project name, use '.' for current directory, or use --here flag")
-        raise typer.Exit(1)
+        error_panel = Panel(
 
-    if here:
-        project_name = Path.cwd().name
-        project_path = Path.cwd()
+            f"Directory '[cyan]{project_path}[/cyan]' does not exist",
 
-        existing_items = list(project_path.iterdir())
-        if existing_items:
-            console.print(f"[yellow]Warning:[/yellow] Current directory is not empty ({len(existing_items)} items)")
-            console.print("[yellow]Template files will be merged with existing content and may overwrite existing files[/yellow]")
-            if force:
-                console.print("[cyan]--force supplied: skipping confirmation and proceeding with merge[/cyan]")
-            else:
-                response = typer.confirm("Do you want to continue?")
-                if not response:
-                    console.print("[yellow]Operation cancelled[/yellow]")
-                    raise typer.Exit(0)
-    else:
-        project_path = Path(project_name).resolve()
-        if project_path.exists():
-            error_panel = Panel(
-                f"Directory '[cyan]{project_name}[/cyan]' already exists\n"
-                "Please choose a different project name or remove the existing directory.",
-                title="[red]Directory Conflict[/red]",
-                border_style="red",
-                padding=(1, 2)
-            )
-            console.print()
-            console.print(error_panel)
-            raise typer.Exit(1)
+            title='[red]Invalid Path[/red]',
 
-    current_dir = Path.cwd()
+            border_style='red',
 
-    setup_lines = [
-        "[cyan]Specify Project Setup[/cyan]",
-        "",
-        f"{'Project':<15} [green]{project_path.name}[/green]",
-        f"{'Working Path':<15} [dim]{current_dir}[/dim]",
-    ]
+            padding=(1, 2),
 
-    if not here:
-        setup_lines.append(f"{'Target Path':<15} [dim]{project_path}[/dim]")
-
-    console.print(Panel("\n".join(setup_lines), border_style="cyan", padding=(1, 2)))
-
-    should_init_git = False
-    if not no_git:
-        should_init_git = check_tool("git")
-        if not should_init_git:
-            console.print("[yellow]Git not found - will skip repository initialization[/yellow]")
-
-    if ai_assistant:
-        if ai_assistant not in AGENT_CONFIG:
-            console.print(f"[red]Error:[/red] Invalid AI assistant '{ai_assistant}'. Choose from: {', '.join(AGENT_CONFIG.keys())}")
-            raise typer.Exit(1)
-        selected_ai = ai_assistant
-    else:
-        # Create options dict for selection (agent_key: display_name)
-        ai_choices = {key: config["name"] for key, config in AGENT_CONFIG.items()}
-        selected_ai = select_with_arrows(
-            ai_choices, 
-            "Choose your AI assistant:", 
-            "copilot"
         )
 
+        console.print()
+
+        console.print(error_panel)
+
+        raise typer.Exit(1)
+
+    if not project_path.is_dir():
+
+        error_panel = Panel(
+
+            f"Path '[cyan]{project_path}[/cyan]' is not a directory",
+
+            title='[red]Invalid Path[/red]',
+
+            border_style='red',
+
+            padding=(1, 2),
+
+        )
+
+        console.print()
+
+        console.print(error_panel)
+
+        raise typer.Exit(1)
+
+    specify_dir = project_path / '.specify'
+
+    agent_folder = None
+
+    if ai_assistant and ai_assistant in AGENT_CONFIG:
+
+        agent_folder = AGENT_CONFIG[ai_assistant]['folder']
+
+    if specify_dir.exists() and not force:
+
+        warning_panel = Panel(
+
+            "Existing .specify content detected. Continuing may overwrite files.",
+
+            title='[yellow]Existing Specify Assets[/yellow]',
+
+            border_style='yellow',
+
+            padding=(1, 2),
+
+        )
+
+        console.print()
+
+        console.print(warning_panel)
+
+        if not typer.confirm('Do you want to continue and merge the new assets?'):
+
+            console.print('[yellow]Operation cancelled[/yellow]')
+
+            raise typer.Exit(0)
+
+    working_dir = Path.cwd()
+
+    setup_lines = [
+
+        '[cyan]Specify Workspace Setup[/cyan]',
+
+        '',
+
+        f"{'Target Path':<15} [green]{project_path}[/green]",
+
+        f"{'Working Path':<15} [dim]{working_dir}[/dim]",
+
+    ]
+
+    console.print(Panel('\n'.join(setup_lines),
+                  border_style='cyan', padding=(1, 2)))
+
+    if ai_assistant:
+
+        if ai_assistant not in AGENT_CONFIG:
+
+            console.print(
+                f"[red]Error:[/red] Invalid AI assistant '{ai_assistant}'. Choose from: {', '.join(AGENT_CONFIG.keys())}")
+
+            raise typer.Exit(1)
+
+        selected_ai = ai_assistant
+
+    else:
+
+        ai_choices = {key: config['name']
+                      for key, config in AGENT_CONFIG.items()}
+
+        selected_ai = select_with_arrows(
+
+            ai_choices,
+
+            'Choose your AI assistant:',
+
+            'copilot'
+
+        )
+
+    agent_folder = AGENT_CONFIG[selected_ai]['folder']
+
     if not ignore_agent_tools:
+
         agent_config = AGENT_CONFIG.get(selected_ai)
-        if agent_config and agent_config["requires_cli"]:
-            install_url = agent_config["install_url"]
+
+        if agent_config and agent_config['requires_cli']:
+
+            install_url = agent_config['install_url']
+
             if not check_tool(selected_ai):
+
                 error_panel = Panel(
+
                     f"[cyan]{selected_ai}[/cyan] not found\n"
+
                     f"Install from: [cyan]{install_url}[/cyan]\n"
+
                     f"{agent_config['name']} is required to continue with this project type.\n\n"
+
                     "Tip: Use [cyan]--ignore-agent-tools[/cyan] to skip this check",
-                    title="[red]Agent Detection Error[/red]",
-                    border_style="red",
-                    padding=(1, 2)
+
+                    title='[red]Agent Detection Error[/red]',
+
+                    border_style='red',
+
+                    padding=(1, 2),
+
                 )
+
                 console.print()
+
                 console.print(error_panel)
+
                 raise typer.Exit(1)
 
     if script_type:
+
         if script_type not in SCRIPT_TYPE_CHOICES:
-            console.print(f"[red]Error:[/red] Invalid script type '{script_type}'. Choose from: {', '.join(SCRIPT_TYPE_CHOICES.keys())}")
+
+            console.print(
+                f"[red]Error:[/red] Invalid script type '{script_type}'. Choose from: {', '.join(SCRIPT_TYPE_CHOICES.keys())}")
+
             raise typer.Exit(1)
+
         selected_script = script_type
+
     else:
-        default_script = "ps" if os.name == "nt" else "sh"
+
+        default_script = 'ps' if os.name == 'nt' else 'sh'
 
         if sys.stdin.isatty():
-            selected_script = select_with_arrows(SCRIPT_TYPE_CHOICES, "Choose script type (or press Enter)", default_script)
+
+            selected_script = select_with_arrows(
+                SCRIPT_TYPE_CHOICES, 'Choose script type (or press Enter)', default_script)
+
         else:
+
             selected_script = default_script
 
     console.print(f"[cyan]Selected AI assistant:[/cyan] {selected_ai}")
+
     console.print(f"[cyan]Selected script type:[/cyan] {selected_script}")
 
-    tracker = StepTracker("Initialize Specify Project")
+    tracker = StepTracker('Prepare Specify Workspace')
 
-    sys._specify_tracker_active = True
+    sys._specify_tracker_active = True  # type: ignore[attr-defined]
 
-    tracker.add("precheck", "Check required tools")
-    tracker.complete("precheck", "ok")
-    tracker.add("ai-select", "Select AI assistant")
-    tracker.complete("ai-select", f"{selected_ai}")
-    tracker.add("script-select", "Select script type")
-    tracker.complete("script-select", selected_script)
     for key, label in [
-        ("fetch", "Fetch latest release"),
-        ("download", "Download template"),
-        ("extract", "Extract template"),
-        ("zip-list", "Archive contents"),
-        ("extracted-summary", "Extraction summary"),
-        ("chmod", "Ensure scripts executable"),
-        ("cleanup", "Cleanup"),
-        ("git", "Initialize git repository"),
-        ("final", "Finalize")
+
+        ('prepare', 'Prepare workspace directories'),
+
+        ('copy-memory', 'Copy memory resources'),
+
+        ('copy-scripts', 'Copy helper scripts'),
+
+        ('copy-templates', 'Copy templates'),
+
+        ('commands', 'Generate AI commands'),
+
+        ('architecture', 'Seed architecture commands'),
+
+        ('chmod', 'Ensure scripts executable'),
+
+        ('final', 'Finalize'),
+
     ]:
+
         tracker.add(key, label)
 
-    # Track git error message outside Live context so it persists
-    git_error_message = None
-
     with Live(tracker.render(), console=console, refresh_per_second=8, transient=True) as live:
-        tracker.attach_refresh(lambda: live.update(tracker.render()))
-        try:
-            verify = not skip_tls
-            local_ssl_context = ssl_context if verify else False
-            local_client = httpx.Client(verify=local_ssl_context)
 
-            download_and_extract_template(project_path, selected_ai, selected_script, here, verbose=False, tracker=tracker, client=local_client, debug=debug, github_token=github_token)
+        tracker.attach_refresh(lambda: live.update(tracker.render()))
+
+        try:
+
+            prepare_workspace(project_path, selected_ai,
+                              selected_script, force=force, tracker=tracker)
+
+            tracker.start('chmod')
 
             ensure_executable_scripts(project_path, tracker=tracker)
 
-            if not no_git:
-                tracker.start("git")
-                if is_git_repo(project_path):
-                    tracker.complete("git", "existing repo detected")
-                elif should_init_git:
-                    success, error_msg = init_git_repo(project_path, quiet=True)
-                    if success:
-                        tracker.complete("git", "initialized")
-                    else:
-                        tracker.error("git", "init failed")
-                        git_error_message = error_msg
-                else:
-                    tracker.skip("git", "git not available")
-            else:
-                tracker.skip("git", "--no-git flag")
+            tracker.complete('final', 'workspace ready')
 
-            tracker.complete("final", "project ready")
         except Exception as e:
-            tracker.error("final", str(e))
-            console.print(Panel(f"Initialization failed: {e}", title="Failure", border_style="red"))
+
+            tracker.error('final', str(e))
+
+            console.print(
+                Panel(f'Initialization failed: {e}', title='Failure', border_style='red'))
+
             if debug:
+
                 _env_pairs = [
-                    ("Python", sys.version.split()[0]),
-                    ("Platform", sys.platform),
-                    ("CWD", str(Path.cwd())),
+
+                    ('Python', sys.version.split()[0]),
+
+                    ('Platform', sys.platform),
+
+                    ('CWD', str(Path.cwd())),
+
                 ]
+
                 _label_width = max(len(k) for k, _ in _env_pairs)
-                env_lines = [f"{k.ljust(_label_width)} → [bright_black]{v}[/bright_black]" for k, v in _env_pairs]
-                console.print(Panel("\n".join(env_lines), title="Debug Environment", border_style="magenta"))
-            if not here and project_path.exists():
-                shutil.rmtree(project_path)
+
+                env_lines = [
+                    f"{k.ljust(_label_width)} -> [bright_black]{v}[/bright_black]" for k, v in _env_pairs]
+
+                console.print(
+                    Panel('\n'.join(env_lines), title='Debug Environment', border_style='magenta'))
+
             raise typer.Exit(1)
-        finally:
-            pass
 
     console.print(tracker.render())
-    console.print("\n[bold green]Project ready.[/bold green]")
-    
-    # Show git error details if initialization failed
-    if git_error_message:
-        console.print()
-        git_error_panel = Panel(
-            f"[yellow]Warning:[/yellow] Git repository initialization failed\n\n"
-            f"{git_error_message}\n\n"
-            f"[dim]You can initialize git manually later with:[/dim]\n"
-            f"[cyan]cd {project_path if not here else '.'}[/cyan]\n"
-            f"[cyan]git init[/cyan]\n"
-            f"[cyan]git add .[/cyan]\n"
-            f"[cyan]git commit -m \"Initial commit\"[/cyan]",
-            title="[red]Git Initialization Failed[/red]",
-            border_style="red",
-            padding=(1, 2)
-        )
-        console.print(git_error_panel)
 
-    # Agent folder security notice
+    console.print('\n[bold green]Workspace ready.[/bold green]')
+
     agent_config = AGENT_CONFIG.get(selected_ai)
+
     if agent_config:
-        agent_folder = agent_config["folder"]
+
+        agent_folder = agent_config['folder']
+
         security_notice = Panel(
-            f"Some agents may store credentials, auth tokens, or other identifying and private artifacts in the agent folder within your project.\n"
-            f"Consider adding [cyan]{agent_folder}[/cyan] (or parts of it) to [cyan].gitignore[/cyan] to prevent accidental credential leakage.",
-            title="[yellow]Agent Folder Security[/yellow]",
-            border_style="yellow",
-            padding=(1, 2)
+
+            f'Some agents may store credentials, auth tokens, or other identifying and private artifacts in the agent folder within your project.\n'
+
+            f'Consider adding [cyan]{agent_folder}[/cyan] (or parts of it) to [cyan].gitignore[/cyan] to prevent accidental credential leakage.',
+
+            title='[yellow]Agent Folder Security[/yellow]',
+
+            border_style='yellow',
+
+            padding=(1, 2),
+
         )
+
         console.print()
+
         console.print(security_notice)
 
-    steps_lines = []
-    if not here:
-        steps_lines.append(f"1. Go to the project folder: [cyan]cd {project_name}[/cyan]")
-        step_num = 2
-    else:
-        steps_lines.append("1. You're already in the project directory!")
+    steps_lines: list[str] = []
+
+    if project_path == working_dir:
+
+        steps_lines.append("1. You're already in the workspace root!")
+
         step_num = 2
 
-    # Add Codex-specific setup step if needed
-    if selected_ai == "codex":
-        codex_path = project_path / ".codex"
-        quoted_path = shlex.quote(str(codex_path))
-        if os.name == "nt":  # Windows
-            cmd = f"setx CODEX_HOME {quoted_path}"
-        else:  # Unix-like systems
-            cmd = f"export CODEX_HOME={quoted_path}"
-        
-        steps_lines.append(f"{step_num}. Set [cyan]CODEX_HOME[/cyan] environment variable before running Codex: [cyan]{cmd}[/cyan]")
+    else:
+
+        steps_lines.append(
+            f"1. Go to the workspace folder: [cyan]cd {project_path}[/cyan]")
+
+        step_num = 2
+
+    if selected_ai == 'codex':
+
+        codex_prompts_src = project_path / '.codex' / 'prompts'
+        codex_prompts_dst = Path.home() / '.codex' / 'prompts'
+
+        steps_lines.append(
+            f"{step_num}. Copy Codex prompts into your home profile: [cyan]{codex_prompts_src} -> {codex_prompts_dst}[/cyan]")
+        steps_lines.append(
+            '   [bright_black](Current Codex releases ignore prompts stored inside the workspace; place them under ~/.codex/prompts.)[/bright_black]')
+
         step_num += 1
 
-    steps_lines.append(f"{step_num}. Start using slash commands with your AI agent:")
+    steps_lines.append(
+        f"{step_num}. Start using slash commands with your AI agent:")
 
-    steps_lines.append("   2.1 [cyan]/speckit.constitution[/] - Establish project principles")
-    steps_lines.append("   2.2 [cyan]/speckit.specify[/] - Create baseline specification")
-    steps_lines.append("   2.3 [cyan]/speckit.plan[/] - Create implementation plan")
-    steps_lines.append("   2.4 [cyan]/speckit.tasks[/] - Generate actionable tasks")
-    steps_lines.append("   2.5 [cyan]/speckit.implement[/] - Execute implementation")
+    command_prefix = step_num
 
-    steps_panel = Panel("\n".join(steps_lines), title="Next Steps", border_style="cyan", padding=(1,2))
+    steps_lines.append(
+        f'   {command_prefix}.1 [cyan]/specify.constitution[/] - Establish project principles')
+
+    steps_lines.append(
+        f'   {command_prefix}.2 [cyan]/specify.architecture.create[/] - Analyse the repository and create the full architecture model')
+
+    steps_lines.append(
+        f'   {command_prefix}.3 [cyan]/specify.specify[/] - Create baseline specification')
+
+    steps_lines.append(
+        f'   {command_prefix}.4 [cyan]/specify.plan[/] - Create implementation plan')
+
+    steps_lines.append(
+        f'   {command_prefix}.5 [cyan]/specify.tasks[/] - Generate actionable tasks')
+
+    steps_lines.append(
+        f'   {command_prefix}.6 [cyan]/specify.implement[/] - Execute implementation')
+
+    steps_panel = Panel('\n'.join(steps_lines),
+                        title='Next Steps', border_style='cyan', padding=(1, 2))
+
     console.print()
+
     console.print(steps_panel)
 
     enhancement_lines = [
-        "Optional commands that you can use for your specs [bright_black](improve quality & confidence)[/bright_black]",
-        "",
-        f"○ [cyan]/speckit.clarify[/] [bright_black](optional)[/bright_black] - Ask structured questions to de-risk ambiguous areas before planning (run before [cyan]/speckit.plan[/] if used)",
-        f"○ [cyan]/speckit.analyze[/] [bright_black](optional)[/bright_black] - Cross-artifact consistency & alignment report (after [cyan]/speckit.tasks[/], before [cyan]/speckit.implement[/])",
-        f"○ [cyan]/speckit.checklist[/] [bright_black](optional)[/bright_black] - Generate quality checklists to validate requirements completeness, clarity, and consistency (after [cyan]/speckit.plan[/])"
+
+        'Optional commands that you can use for your specs [bright_black](improve quality & confidence)[/bright_black]',
+
+        '',
+
+        "- [cyan]/specify.clarify[/] [bright_black](optional)[/bright_black] - Ask structured questions to de-risk ambiguous areas before planning (run before [cyan]/specify.plan[/] if used)",
+
+        "- [cyan]/specify.analyze[/] [bright_black](optional)[/bright_black] - Cross-artifact consistency & alignment report (after [cyan]/specify.tasks[/], before [cyan]/specify.implement[/])",
+
+        "- [cyan]/specify.checklist[/] [bright_black](optional)[/bright_black] - Generate quality checklists to validate requirements completeness, clarity, and consistency (after [cyan]/specify.plan[/])",
+
     ]
-    enhancements_panel = Panel("\n".join(enhancement_lines), title="Enhancement Commands", border_style="cyan", padding=(1,2))
+
+    enhancements_panel = Panel('\n'.join(
+        enhancement_lines), title='Enhancement Commands', border_style='cyan', padding=(1, 2))
+
     console.print()
+
     console.print(enhancements_panel)
+
 
 @app.command()
 def check():
     """Check that all required tools are installed."""
+
     show_banner()
+
     console.print("[bold]Checking for installed tools...[/bold]\n")
 
     tracker = StepTracker("Check Available Tools")
 
-    tracker.add("git", "Git version control")
-    git_ok = check_tool("git", tracker=tracker)
-
     agent_results = {}
+
     for agent_key, agent_config in AGENT_CONFIG.items():
+
         agent_name = agent_config["name"]
+
         requires_cli = agent_config["requires_cli"]
 
         tracker.add(agent_key, agent_name)
 
         if requires_cli:
+
             agent_results[agent_key] = check_tool(agent_key, tracker=tracker)
+
         else:
+
             # IDE-based agent - skip CLI check and mark as optional
+
             tracker.skip(agent_key, "IDE-based, no CLI check")
-            agent_results[agent_key] = False  # Don't count IDE agents as "found"
+
+            # Don't count IDE agents as "found"
+            agent_results[agent_key] = False
 
     # Check VS Code variants (not in agent config)
+
     tracker.add("code", "Visual Studio Code")
+
     code_ok = check_tool("code", tracker=tracker)
 
     tracker.add("code-insiders", "Visual Studio Code Insiders")
+
     code_insiders_ok = check_tool("code-insiders", tracker=tracker)
 
     console.print(tracker.render())
 
     console.print("\n[bold green]Specify CLI is ready to use![/bold green]")
 
-    if not git_ok:
-        console.print("[dim]Tip: Install git for repository management[/dim]")
-
     if not any(agent_results.values()):
-        console.print("[dim]Tip: Install an AI assistant for the best experience[/dim]")
+
+        console.print(
+            "[dim]Tip: Install an AI assistant for the best experience[/dim]")
+
+
+def ensure_architecture_templates(project_path: Path) -> None:
+    """Guarantee architecture template files exist under .specify/templates."""
+
+    templates_src = _asset_path("templates")
+
+    templates_dst = project_path / ".specify" / "templates"
+
+    templates_dst.mkdir(parents=True, exist_ok=True)
+
+    for filename in ARCHITECTURE_TEMPLATE_FILES:
+
+        src_path = templates_src / filename
+
+        if not src_path.exists():
+
+            continue
+
+        dst_path = templates_dst / filename
+
+        if not dst_path.exists():
+
+            shutil.copy2(src_path, dst_path)
+
+
+def ensure_architecture_scripts(project_path: Path) -> None:
+    """Ensure architecture helper scripts are available for both shells."""
+
+    scripts_src = _asset_path("scripts")
+
+    scripts_dst = project_path / ".specify" / "scripts"
+
+    scripts_dst.mkdir(parents=True, exist_ok=True)
+
+    for shell_name in ("bash", "powershell"):
+
+        src_dir = scripts_src / shell_name
+
+        if not src_dir.is_dir():
+
+            continue
+
+        dst_dir = scripts_dst / shell_name
+
+        dst_dir.mkdir(parents=True, exist_ok=True)
+
+        for script in src_dir.glob("architecture-info.*"):
+
+            dst_path = dst_dir / script.name
+
+            if not dst_path.exists():
+
+                shutil.copy2(script, dst_path)
+
+                if os.name != "nt" and script.suffix == ".sh":
+
+                    os.chmod(dst_path, 0o755)
+
+
+def ensure_agent_commands(project_path: Path, agent_key: str, script_type: str, tracker: StepTracker | None = None) -> None:
+
+    agent_cfg = AGENT_OUTPUT_CONFIG.get(agent_key)
+
+    agent_folder = AGENT_CONFIG.get(agent_key, {}).get("folder")
+
+    if not agent_cfg or not agent_folder:
+
+        if tracker:
+
+            tracker.skip("commands", "Unsupported agent configuration")
+
+        return
+
+    templates_dir = _asset_path("templates", "commands")
+
+    target_dir = project_path / agent_folder / agent_cfg["subdir"]
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    count = 0
+
+    for template_path in sorted(templates_dir.glob("*.md")):
+
+        name = template_path.stem
+
+        if name.startswith("architecture."):
+
+            continue
+
+        template_body = template_path.read_text(encoding="utf-8")
+
+        rendered = render_agent_command(
+
+            template=template_body,
+
+            agent_key=agent_key,
+
+            script_type=script_type,
+
+            args_token=agent_cfg["args_token"],
+
+            extension=agent_cfg["extension"],
+
+        )
+
+        output_name = f"specify.{name}.{agent_cfg['extension']}"
+
+        (target_dir / output_name).write_text(rendered, encoding="utf-8")
+
+        count += 1
+
+    if agent_key == "copilot":
+
+        try:
+
+            settings_src = _asset_path("templates", "vscode-settings.json")
+
+        except FileNotFoundError:
+
+            settings_src = None
+
+        if settings_src and settings_src.exists():
+
+            vscode_dir = project_path / ".vscode"
+
+            vscode_dir.mkdir(parents=True, exist_ok=True)
+
+            shutil.copy2(settings_src, vscode_dir / "settings.json")
+
+    if tracker:
+
+        tracker.complete("commands", f"{count} command file(s)")
+
+
+def _rewrite_command_paths(text: str) -> str:
+
+    for old, new in (("memory/", ".specify/memory/"), ("scripts/", ".specify/scripts/"), ("templates/", ".specify/templates/")):
+
+        text = text.replace(old, new)
+
+    return text
+
+
+def _parse_command_template(template: str) -> tuple[str, dict[str, str], dict[str, str], str]:
+
+    if not template.startswith("---"):
+
+        return "", {}, {}, template
+
+    parts = template.split("---", 2)
+
+    if len(parts) < 3:
+
+        return "", {}, {}, template
+
+    front_matter_lines = parts[1].splitlines()
+
+    body = parts[2]
+
+    description = ""
+
+    scripts: dict[str, str] = {}
+
+    agent_scripts: dict[str, str] = {}
+
+    current = None
+
+    for line in front_matter_lines:
+
+        if line.startswith("description:"):
+
+            description = line.split(":", 1)[1].strip()
+
+        elif line.strip() == "scripts:":
+
+            current = "scripts"
+
+        elif line.strip() == "agent_scripts:":
+
+            current = "agent_scripts"
+
+        elif line.startswith("  ") and current:
+
+            key, value = line.strip().split(":", 1)
+
+            value = value.strip()
+
+            if current == "scripts":
+
+                scripts[key.strip()] = value
+
+            else:
+
+                agent_scripts[key.strip()] = value
+
+        else:
+
+            current = None
+
+    return description, scripts, agent_scripts, body
+
+
+AGENT_OUTPUT_CONFIG = {
+
+    "claude": {"subdir": "commands", "extension": "md", "args_token": "$ARGUMENTS"},
+
+    "gemini": {"subdir": "commands", "extension": "toml", "args_token": "{{args}}"},
+
+    "copilot": {"subdir": "prompts", "extension": "prompt.md", "args_token": "$ARGUMENTS"},
+
+    "cursor-agent": {"subdir": "commands", "extension": "md", "args_token": "$ARGUMENTS"},
+
+    "qwen": {"subdir": "commands", "extension": "toml", "args_token": "{{args}}"},
+
+    "opencode": {"subdir": "command", "extension": "md", "args_token": "$ARGUMENTS"},
+
+    "codex": {"subdir": "prompts", "extension": "md", "args_token": "$ARGUMENTS"},
+
+    "windsurf": {"subdir": "workflows", "extension": "md", "args_token": "$ARGUMENTS"},
+
+    "kilocode": {"subdir": "workflows", "extension": "md", "args_token": "$ARGUMENTS"},
+
+    "auggie": {"subdir": "commands", "extension": "md", "args_token": "$ARGUMENTS"},
+
+    "roo": {"subdir": "commands", "extension": "md", "args_token": "$ARGUMENTS"},
+
+    "codebuddy": {"subdir": "commands", "extension": "md", "args_token": "$ARGUMENTS"},
+
+    "amp": {"subdir": "commands", "extension": "md", "args_token": "$ARGUMENTS"},
+
+    "q": {"subdir": "prompts", "extension": "md", "args_token": "$ARGUMENTS"},
+
+}
+
+
+def render_agent_command(template: str, agent_key: str, script_type: str, args_token: str, extension: str) -> str:
+
+    description, scripts, agent_scripts, body = _parse_command_template(
+        template)
+
+    script_command = scripts.get(script_type) or scripts.get("sh") or ""
+
+    agent_script_command = agent_scripts.get(script_type) or ""
+
+    body = body.replace("{SCRIPT}", script_command)
+
+    body = body.replace("{AGENT_SCRIPT}", agent_script_command)
+
+    body = body.replace("{ARGS}", args_token)
+
+    body = body.replace("__AGENT__", agent_key)
+
+    body = _rewrite_command_paths(body)
+
+    if extension == "toml":
+
+        escaped_body = body.replace("\\", "\\\\")
+
+        return f'description = "{description}"\n\nprompt = """\n{escaped_body}\n"""\n'
+
+    else:
+
+        header = f"---\ndescription: {description}\n---\n\n" if description else ""
+
+        return header + body.strip() + "\n"
+
+
+def ensure_architecture_commands(project_path: Path, agent_key: str, script_type: str, tracker: StepTracker | None = None) -> None:
+
+    agent_cfg = AGENT_OUTPUT_CONFIG.get(agent_key)
+
+    agent_folder = AGENT_CONFIG.get(agent_key, {}).get("folder")
+
+    if not agent_cfg or not agent_folder:
+
+        if tracker:
+
+            tracker.skip("architecture", "Unsupported agent configuration")
+
+        return
+
+    templates_dir = _asset_path("templates", "commands")
+
+    target_dir = project_path / agent_folder / agent_cfg["subdir"]
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    legacy_bases = [
+
+        "specify.create",
+
+        "specify.update",
+
+        "specify.architecture-create",
+
+        "specify.architecture-update",
+
+    ]
+
+    for legacy in legacy_bases:
+
+        legacy_path = target_dir / f"{legacy}.{agent_cfg['extension']}"
+
+        if legacy_path.exists():
+
+            legacy_path.unlink()
+
+    count = 0
+
+    for template_path in sorted(templates_dir.glob("architecture.*.md")):
+
+        template_body = template_path.read_text(encoding="utf-8")
+
+        name = template_path.stem  # e.g. architecture.create
+
+        filename = f"specify.{name}.{agent_cfg['extension']}"
+
+        target_path = target_dir / filename
+
+        if target_path.exists():
+
+            continue
+
+        rendered = render_agent_command(
+
+            template=template_body,
+
+            agent_key=agent_key,
+
+            script_type=script_type,
+
+            args_token=agent_cfg["args_token"],
+
+            extension=agent_cfg["extension"],
+
+        )
+
+        target_path.write_text(rendered, encoding="utf-8")
+
+        count += 1
+
+    if tracker:
+
+        tracker.complete("architecture", f"{count} command file(s)")
+
+
+def create_architecture_scaffold(project_path: Path) -> None:
+    """Create specs/architecture scaffolding with placeholder artefacts."""
+
+    architecture_dir = project_path / "specs" / "architecture"
+
+    architecture_dir.mkdir(parents=True, exist_ok=True)
+
+    readme_path = architecture_dir / "README.md"
+
+    if not readme_path.exists():
+
+        readme_path.write_text(
+            ARCHITECTURE_DIRECTORY_OVERVIEW, encoding="utf-8")
+
+
+def prepare_workspace(project_path: Path, agent_key: str, script_type: str, *, force: bool = False, tracker: StepTracker | None = None) -> None:
+    '''Populate the workspace with Specify assets and agent-specific commands.'''
+
+    specify_dir = project_path / '.specify'
+
+    specs_dir = project_path / 'specs'
+
+    if tracker:
+
+        tracker.start('prepare')
+
+    specify_dir.mkdir(parents=True, exist_ok=True)
+
+    specs_dir.mkdir(parents=True, exist_ok=True)
+
+    if tracker:
+
+        tracker.complete('prepare', '.specify')
+
+    if tracker:
+
+        tracker.start('copy-memory')
+
+    _sync_directory(_asset_path('memory'), specify_dir / 'memory')
+
+    if tracker:
+
+        tracker.complete('copy-memory', 'memory')
+
+    if tracker:
+
+        tracker.start('copy-scripts')
+
+    _sync_directory(_asset_path('scripts'), specify_dir / 'scripts')
+
+    if tracker:
+
+        tracker.complete('copy-scripts', 'scripts')
+
+    if tracker:
+
+        tracker.start('copy-templates')
+
+    _sync_directory(_asset_path('templates'), specify_dir / 'templates',
+                    exclude_dirs={'commands'}, exclude_files={'vscode-settings.json'})
+
+    if tracker:
+
+        tracker.complete('copy-templates', 'templates')
+
+    ensure_architecture_templates(project_path)
+
+    ensure_architecture_scripts(project_path)
+
+    create_architecture_scaffold(project_path)
+
+    if tracker:
+
+        tracker.start('commands')
+
+    ensure_agent_commands(project_path, agent_key,
+                          script_type, tracker=tracker)
+
+    if tracker:
+
+        tracker.start('architecture')
+
+    ensure_architecture_commands(
+        project_path, agent_key, script_type, tracker=tracker)
+
 
 def main():
     app()
 
+
 if __name__ == "__main__":
     main()
-

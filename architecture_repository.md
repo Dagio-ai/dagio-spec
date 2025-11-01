@@ -1,0 +1,24 @@
+architecture/
+  c1_context/
+    system_context.md
+  c2_containers/
+    <container-name>/
+      container_diagram.md
+    containers_overview.md
+  c3_components/
+    <container-name>/
+      <component-name>/
+        component_diagram.md
+      components_overview.md
+  c4_code/
+    <component-name>/
+      code_structure.md
+  c5_dynamic_view/
+    view_diagram.md
+  c6_deployment/
+    deployment_diagram.md
+  c7_tests/
+    tests_overview.md
+  architecture.json
+  architecture_logs.md
+  architecture_overview.md
