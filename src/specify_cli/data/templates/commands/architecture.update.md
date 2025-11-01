@@ -11,19 +11,29 @@ scripts:
 $ARGUMENTS
 ```
 
-Clarify whether the user wants a full refresh or targeted updates (specific containers/components/views).
+**Mandatory:** Ask the user which scope to run:
+
+- **A) Full architecture refresh** — revisit every view
+- **B) Active feature refresh** — update only the artefacts impacted by the currently active feature
+
+If the user has not decided, pause and wait. For option B confirm the active feature name (use `specify feature current` if uncertain).
 
 ## Required Flow
 
-1. **Gather context**
+1. **Determine scope & gather context**
+   - Record whether you're executing scope **A** (full) or **B** (active feature).
    - Run `{SCRIPT}` from the repo root to obtain the current file inventory.
    - Load `specs/architecture/architecture.json`; abort with guidance if the file does not exist (the user must run `/specify.architecture.create` first).
    - Capture the existing `model_version`, per-view versions, container/component definitions, and last log entry.
    - Review `specs/architecture/architecture_overview.md` and `specs/architecture/architecture_logs.md` to understand recent changes and outstanding TODOs.
    - Refer to `architecture_repository.md` to keep the directory layout consistent when adding or removing artefacts.
+   - **If scope B (active feature refresh)**:
+     - Run `.specify/scripts/powershell/check-prerequisites.ps1 -Json -PathsOnly` (or the bash equivalent) to obtain absolute paths for `FEATURE_SPEC`, `IMPL_PLAN`, `TASKS`, etc.
+     - Load the feature artefacts (spec.md, plan.md, tasks.md, plus data-model, contracts, research, quickstart when present).
+     - Summarise the deltas that are relevant to architecture changes so the updates stay aligned with the completed feature.
 
 2. **Assess required updates**
-   - Determine which parts of the architecture are affected (system-wide, container-level, component-level, or documentation-only updates).
+   - Determine which parts of the architecture are affected (system-wide, container-level, component-level, or documentation-only updates). For scope B, map the impact directly from the feature artefacts you reviewed.
    - For each impacted view, bump only the PATCH component (e.g., `1.0.2` -> `1.0.3`) to stay aligned with the `1.0.x` lifecycle.
    - Decide whether the overall `model_version` also needs a bump. Follow the patch-only progression (`1.0.0`, `1.0.1`, ... `1.0.99`) unless explicitly instructed otherwise.
 
@@ -46,6 +56,7 @@ Clarify whether the user wants a full refresh or targeted updates (specific cont
    - After writing each file, compute its checksum (e.g., SHA-256) and update the corresponding entry in `architecture.json` with the definitive checksum and `last_updated` timestamp.
    - Ensure the tests overview (`c7_tests/tests_overview.md`) stays in sync with recent coverage updates before finalising the run.
    - Confirm `code_structure.md` files capture the current database schema (tables, relationships, constraints) when changes have occurred.
+   - When operating in scope B, explicitly reference the feature artefacts (spec, plan, tasks) to demonstrate how each architecture change maps to the completed work.
    - Re-save every generated file as UTF-8 without BOM. For each path you can run:
      ```bash
      python - <<'PY'
@@ -60,13 +71,14 @@ Clarify whether the user wants a full refresh or targeted updates (specific cont
 
 5. **Update overview and change log**
    - Revise `architecture_overview.md` with the latest `model_version`, highlight what changed, and regenerate the `## Table of Contents` so it links to every view listed in `architecture.json`.
-   - Append a new entry to `architecture_logs.md` that records the version bump, timestamp, impacted views, and follow-up actions.
+   - Append a new entry to `architecture_logs.md` that records the version bump, timestamp, impacted views, follow-up actions, and whether the run was scope A or scope B (include the feature identifier when applicable).
 
 6. **Report**
-   - Summarise the changes, explicitly listing updated files and the new versions recorded in `architecture.json`.
+   - Summarise the changes, explicitly listing updated files and the new versions recorded in `architecture.json`. State whether you executed scope A or B and name the active feature when relevant.
    - Call out remaining risks or TODOs.
 
 ## Output Expectations
+- Document the selected scope (A = full refresh, B = active feature) in the response and, for scope B, mention the feature identifier.
 - `specs/architecture/architecture.json` is updated first and reflects the new `model_version`, per-view versions, and container/component inventory.
 - Only the necessary Markdown files (C1 through C6 plus per-container/per-component documents) are regenerated, and each has a refreshed checksum/timestamp recorded in the JSON model.
 - `specs/architecture/architecture_logs.md` includes a new entry describing this update.
