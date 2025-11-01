@@ -193,6 +193,12 @@ if (Test-Path $template) {
 # Set the SPECIFY_FEATURE environment variable for the current session
 $env:SPECIFY_FEATURE = $branchName
 
+# Persist active feature marker
+$activeFeatureDir = Join-Path $repoRoot '.specify'
+New-Item -ItemType Directory -Path $activeFeatureDir -Force | Out-Null
+$activeFeatureFile = Join-Path $activeFeatureDir 'active_feature'
+Set-Content -Path $activeFeatureFile -Value $branchName -Encoding utf8
+
 if ($Json) {
     $obj = [PSCustomObject]@{ 
         BRANCH_NAME = $branchName

@@ -1,23 +1,28 @@
-# Spec Kit
+# Specify CLI
 
-Spec Kit helps internal teams practise Spec-Driven Development (SDD). The toolkit bundles the `specify` CLI, reusable templates, and AI workflows so every project starts with the same structure and governance.
+The Specify CLI helps internal teams practise Spec-Driven Development (SDD) and Architecture as Code (AaC). The toolkit bundles the `specify` CLI, reusable templates, and AI workflows so every project starts with the same structure and governance.
 
 ---
 
 ## Table of Contents
 
-- [Install](#install)
-- [Quick Start](#quick-start)
-- [Slash Commands](#slash-commands)
-- [Architecture Model](#architecture-model)
-- [Reference](#reference)
-- [Support](#support)
+- [Specify CLI](#specify-cli)
+  - [Table of Contents](#table-of-contents)
+  - [Install](#install)
+  - [Quick Start](#quick-start)
+    - [Manage Active Features](#manage-active-features)
+  - [Slash Commands](#slash-commands)
+  - [Architecture Model](#architecture-model)
+  - [Reference](#reference)
+    - [CLI Options (`specify init`)](#cli-options-specify-init)
+    - [Repository Layout](#repository-layout)
+  - [Support](#support)
 
 ---
 
 ## Install
 
-Spec Kit is designed for internal distribution. Point `uv` at the repository you cloned:
+Specify is designed for internal distribution. Point `uv` at the repository you cloned:
 
 ```bash
 # persistent install
@@ -59,10 +64,21 @@ specify init --force --ai codex
 After an init the typical flow is:
 
 1. `/specify.constitution` - establish project principles
-2. `/specify.specify` - capture the functional spec
-3. `/specify.plan` - define the implementation plan
-4. `/specify.tasks` - break work into actionable steps
-5. `/specify.implement` - execute the plan
+2. `/specify.architecture.create` | Analyse the repository and create the full architecture model |
+3. `/specify.specify` - capture the functional spec
+4. `/specify.plan` - define the implementation plan
+5. `/specify.tasks` - break work into actionable steps
+6. `/specify.implement` - execute the plan
+
+### Manage Active Features
+
+Each `/specify.specify` run exports `SPECIFY_FEATURE` for the current shell and writes the selection to `.specify/active_feature`. Downstream commands read that marker so new terminals automatically target the same spec.
+
+- Show the active feature and its source: `specify feature current`
+- Switch to an existing feature (numeric prefixes are resolved automatically): `specify feature set 004-reporting-dashboard`
+- Use `--force` if you want to point at a feature directory that has not been scaffolded yet
+
+Setting `SPECIFY_FEATURE` manually still overrides the marker for the current process.
 
 ---
 
@@ -88,7 +104,7 @@ After an init the typical flow is:
 The architecture workflow is centred on `specs/architecture/architecture.json`. `/specify.architecture.create` populates that file before writing any Markdown views. The JSON model records:
 
 - `model_version` and `generated_at`
-- every view (C1-C6 plus per-container/per-component documents) with `path`, `version`, `checksum`, and `last_updated`
+- every view (C1-C7 plus per-container/per-component documents) with `path`, `version`, `checksum`, and `last_updated`
 - containers and components with their associated views
 - the change log pointer (`specs/architecture/architecture_logs.md`)
 
@@ -130,6 +146,6 @@ Treat the JSON as the single source of truth - manual edits to Markdown should b
 
 ## Support
 
-- **Questions / Issues**: open a thread in the internal Spec Kit channel
+- **Questions / Issues**: open a thread in the internal Specify channel
 - **Agent additions**: update `src/specify_cli/data/templates/commands/` and `src/specify_cli/__init__.py` (`AGENT_CONFIG`) with the new assistant metadata
 - **Bug reports**: capture the failing command, stack traces with `--debug`, and attach the relevant files from `.specify/` or `specs/`

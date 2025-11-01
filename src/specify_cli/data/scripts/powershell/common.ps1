@@ -14,9 +14,22 @@ function Get-CurrentBranch {
     if ($env:SPECIFY_FEATURE) {
         return $env:SPECIFY_FEATURE
     }
+
+    $repoRoot = Get-RepoRoot
+    $activeFeatureFile = Join-Path (Join-Path $repoRoot '.specify') 'active_feature'
+
+    if (Test-Path $activeFeatureFile) {
+        try {
+            $activeFeature = (Get-Content -LiteralPath $activeFeatureFile -TotalCount 1).Trim()
+            if ($activeFeature) {
+                return $activeFeature
+            }
+        } catch {
+            # Ignore read issues and fall back to directory scan
+        }
+    }
     
     # For VCS-free repos, try to find the latest feature directory
-    $repoRoot = Get-RepoRoot
     $specsDir = Join-Path $repoRoot "specs"
     
     if (Test-Path $specsDir) {

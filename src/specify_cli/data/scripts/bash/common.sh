@@ -23,6 +23,17 @@ get_current_branch() {
 
     local repo_root
     repo_root=$(get_repo_root)
+
+    local active_file="$repo_root/.specify/active_feature"
+    if [[ -f "$active_file" ]]; then
+        local active_feature
+        active_feature="$(head -n 1 "$active_file" | tr -d '\r' | xargs)"
+        if [[ -n "$active_feature" ]]; then
+            echo "$active_feature"
+            return
+        fi
+    fi
+
     local specs_dir="$repo_root/specs"
 
     if [[ -d "$specs_dir" ]]; then

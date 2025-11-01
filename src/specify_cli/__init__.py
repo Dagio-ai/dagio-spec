@@ -30,6 +30,7 @@ import shutil
 import shlex
 import json
 import textwrap
+import re
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -226,6 +227,107 @@ def _sync_directory(src: Path, dest: Path, *, exclude_dirs: set[str] | None = No
                 continue
 
             shutil.copy2(item, dest / item.name)
+
+
+def find_workspace_root(start: Path | None = None) -> Optional[Path]:
+    """Locate the nearest Specify workspace root searching upwards."""
+
+    current = (start or Path.cwd()).resolve()
+
+    for candidate in [current, *current.parents]:
+        if any((candidate / marker).exists() for marker in (".specify", "specs")):
+            return candidate
+
+    return None
+
+
+def active_feature_marker(root: Path) -> Path:
+    """Return the path to the active feature marker file."""
+
+    return root / ".specify" / "active_feature"
+
+
+def resolve_active_feature(root: Path) -> tuple[Optional[str], str]:
+    """Determine the active feature and describe the source used."""
+
+    env_value = os.environ.get("SPECIFY_FEATURE", "").strip()
+    if env_value:
+        return env_value, "SPECIFY_FEATURE environment variable"
+
+    marker = active_feature_marker(root)
+    if marker.exists():
+        try:
+            with marker.open("r", encoding="utf-8") as handle:
+                value = handle.readline().strip()
+            if value:
+                return value, ".specify/active_feature"
+        except OSError:
+            pass
+
+    specs_dir = root / "specs"
+    if specs_dir.exists():
+        pattern = re.compile(r"^(\d{3})-")
+        latest: Optional[str] = None
+        highest = -1
+
+        for entry in specs_dir.iterdir():
+            if not entry.is_dir():
+                continue
+
+            match = pattern.match(entry.name)
+            if not match:
+                continue
+
+            number = int(match.group(1))
+            if number > highest:
+                highest = number
+                latest = entry.name
+
+        if latest:
+            return latest, "latest specs directory"
+
+    return None, "no feature detected"
+
+
+def write_active_feature(root: Path, feature: str) -> Path:
+    """Persist the active feature marker."""
+
+    specify_dir = root / ".specify"
+    specify_dir.mkdir(parents=True, exist_ok=True)
+
+    marker = active_feature_marker(root)
+    marker.write_text(f"{feature}\n", encoding="utf-8")
+    return marker
+
+
+def locate_feature_directory(root: Path, identifier: str) -> tuple[Optional[str], list[str]]:
+    """Find an existing feature directory matching the identifier.
+
+    Returns (resolved_name, ambiguous_matches). resolved_name is None when the identifier does not
+    map cleanly to one feature. ambiguous_matches is populated when multiple prefix matches exist.
+    """
+
+    specs_dir = root / "specs"
+    if not specs_dir.exists():
+        return None, []
+
+    candidate = specs_dir / identifier
+    if candidate.is_dir():
+        return identifier, []
+
+    matches: list[str] = []
+    prefix_match = re.fullmatch(r"(\d{3})", identifier) or re.match(r"(\d{3})-", identifier)
+
+    if prefix_match:
+        prefix = prefix_match.group(1)
+        for entry in specs_dir.iterdir():
+            if entry.is_dir() and entry.name.startswith(f"{prefix}-"):
+                matches.append(entry.name)
+
+        if len(matches) == 1:
+            return matches[0], matches
+
+    return None, matches
 
 
 SCRIPT_TYPE_CHOICES = {"sh": "POSIX Shell (bash/zsh)", "ps": "PowerShell"}
@@ -466,6 +568,9 @@ app = typer.Typer(
     cls=BannerGroup,
 )
 
+feature_app = typer.Typer(help="Manage the active Specify feature.")
+app.add_typer(feature_app, name="feature")
+
 
 def show_banner():
     """Display the ASCII art banner."""
@@ -481,6 +586,82 @@ def show_banner():
     console.print(Align.center(styled_banner))
     console.print(Align.center(Text(TAGLINE, style="italic bright_yellow")))
     console.print()
+
+
+@feature_app.command("current")
+def feature_current() -> None:
+    """Display the currently selected feature."""
+
+    root = find_workspace_root()
+    if not root:
+        console.print("[red]Unable to locate a Specify workspace from the current directory.[/red]")
+        console.print("Run this command from inside a repository that contains either '.specify/' or 'specs/'.")
+        raise typer.Exit(1)
+
+    feature, source = resolve_active_feature(root)
+    if not feature:
+        console.print("[yellow]No active feature detected.[/yellow]")
+        console.print("Use 'specify feature set <feature>' after creating one with '/specify.specify'.")
+        raise typer.Exit(1)
+
+    specs_path = root / "specs" / feature
+    location = specs_path if specs_path.exists() else None
+    console.print(f"[green]Active feature:[/green] [cyan]{feature}[/cyan] (source: {source})")
+    if location:
+        console.print(f"Spec directory: {location.relative_to(root)}")
+
+
+@feature_app.command("set")
+def feature_set(
+    feature: str = typer.Argument(..., help="Feature identifier, e.g. '004-new-checkout'."),
+    force: bool = typer.Option(False, "--force", help="Set even if no matching specs directory exists."),
+) -> None:
+    """Persist the active feature selection."""
+
+    root = find_workspace_root()
+    if not root:
+        console.print("[red]Unable to locate a Specify workspace from the current directory.[/red]")
+        raise typer.Exit(1)
+
+    identifier = feature.strip()
+    if not identifier:
+        console.print("[red]Feature identifier cannot be empty.[/red]")
+        raise typer.Exit(1)
+
+    resolved, matches = locate_feature_directory(root, identifier)
+    specs_dir = root / "specs"
+
+    if resolved is None:
+        if matches:
+            match_list = ", ".join(matches)
+            console.print(f"[red]Multiple features share the prefix '{identifier}'.[/red]")
+            console.print(f"Matches: {match_list}")
+            console.print("Provide the full feature name to disambiguate.")
+            raise typer.Exit(1)
+
+        if not force:
+            relative_specs = specs_dir.relative_to(root) if specs_dir.exists() else Path("specs")
+            console.print(f"[red]Feature '{identifier}' does not exist under {relative_specs}.[/red]")
+            console.print("Re-run with '--force' to record it anyway or create the feature first using '/specify.specify'.")
+            raise typer.Exit(1)
+
+        resolved = identifier
+
+    marker = write_active_feature(root, resolved)
+    os.environ["SPECIFY_FEATURE"] = resolved
+
+    console.print(f"[green]Active feature set to[/green] [cyan]{resolved}[/cyan].")
+    console.print(f"Marker written to {marker.relative_to(root)}")
+
+    if resolved != identifier:
+        console.print(f"(Resolved from input '{identifier}')")
+
+    console.print("Export SPECIFY_FEATURE in your shell for immediate use:")
+    if os.name == "nt":
+        console.print(f"  setx SPECIFY_FEATURE {resolved}")
+        console.print(f"  (PowerShell) $env:SPECIFY_FEATURE = \"{resolved}\"")
+    else:
+        console.print(f"  export SPECIFY_FEATURE={resolved}")
 
 
 @app.callback()
