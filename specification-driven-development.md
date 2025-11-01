@@ -401,3 +401,32 @@ By embedding these principles into the specification and planning process, SDD e
 This isn't about replacing developers or automating creativity. It's about amplifying human capability by automating mechanical translation. It's about creating a tight feedback loop where specifications, research, and code evolve together, each iteration bringing deeper understanding and better alignment between intent and implementation.
 
 Software development needs better tools for maintaining alignment between intent and implementation. SDD provides the methodology for achieving this alignment through executable specifications that generate code rather than merely guiding it.
+
+---
+
+## SDD and the Specify Toolkit
+
+To operationalize SDD in this repository we rely on the Specify CLI workflow. It layers concrete guardrails (architecture-as-data, versioning rules, Mermaid validation, exhaustive testing) on top of the principles described above.
+
+1. **Foundations (`/specify.constitution`)**  captures the non-negotiable principles (quality, security, delivery) in `.specify/memory/constitution.md`. Every downstream command imports it.
+
+2. **Architecture as data (`/specify.architecture.create`)**
+   - Generates `specs/architecture/architecture.json` (authoritative model, patch versions within the `1.0.x` range).
+   - Writes C1-C7 views, validated Mermaid diagrams, and cross-links (containers <-> components <-> code structure).
+   - Builds `c7_tests/tests_overview.md`, an exhaustive suite catalogue (purpose, owners, commands, coverage focus, risks, last run).
+   - Use `mmdc` (`npm install -g @mermaid-js/mermaid-cli`) or `./specs/architecture/export_to_pdf.sh` to validate diagrams and produce a PDF.
+
+3. **Specification & planning (`/specify.specify`, `/specify.plan`, `/specify.tasks`)**
+   - Align requirements with the architecture model. After significant changes run `/specify.architecture.update` to keep `architecture.json` and the Markdown views in sync.
+   - Tasks inherit the constitution and plan context; security and database implications must be captured in the component and code artefacts before work starts.
+
+4. **Implementation & verification (`/specify.implement`, optional `/specify.clarify`, `/specify.analyze`)**
+   - Execute the task list while refreshing breadcrumbs, Mermaid diagrams, the tests table, and security notes.
+   - `/specify.architecture.update` bumps model/view patch versions (`1.0.x`) and records changes in `architecture_logs.md`.
+
+5. **Operational tooling**
+   - `python -m compileall src/specify_cli` quick regression check for the CLI.
+   - `npm install -g md-to-pdf @mermaid-js/mermaid-cli` plus `./specs/architecture/export_to_pdf.sh`  produce deliverable PDFs.
+   - `mmdc -i <diagram> -o /tmp/out.svg` (or https://mermaid.live)  validate Mermaid diagrams before sharing.
+
+Following this workflow keeps specifications, architecture, plans, tasks, code, and tests in permanent alignment. The AI assistant can automate the mechanical work, but guardrails (versioning rules, Mermaid validation, exhaustive test catalogue, security notes) ensure the delivered system remains faithful to the intent captured in your SDD artefacts.

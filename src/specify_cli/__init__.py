@@ -232,8 +232,8 @@ SCRIPT_TYPE_CHOICES = {"sh": "POSIX Shell (bash/zsh)", "ps": "PowerShell"}
 
 CLAUDE_LOCAL_PATH = Path.home() / ".claude" / "local" / "claude"
 
-BANNER = ""
-TAGLINE = "GitHub Spec Kit - Spec-Driven Development Toolkit"
+BANNER = "DAGIO Specify"
+TAGLINE = "Based on GitHub Spec Kit version 0.0.79 - Spec-Driven Development Toolkit (https://github.com/github/spec-kit)"
 
 
 class StepTracker:

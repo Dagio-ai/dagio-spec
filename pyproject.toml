@@ -20,7 +20,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/specify_cli"]
-GO
+
 [tool.hatch.build.targets.sdist]
 include = ["src/specify_cli/data/**"]
 
