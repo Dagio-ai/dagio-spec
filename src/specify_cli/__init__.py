@@ -182,7 +182,12 @@ def _asset_candidates() -> list[Path]:
         candidates.append(Path(env_dir).expanduser())
 
     module_dir = Path(__file__).resolve().parent
-    candidates.append(module_dir / "data")
+    candidates.extend([
+        module_dir,
+        module_dir / "data",  # legacy fallback before assets moved to package root
+        module_dir.parent,
+        module_dir.parents[1] if len(module_dir.parents) > 1 else None,
+    ])
 
     try:
         candidates.append(Path(__file__).resolve().parents[3])

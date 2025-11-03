@@ -1,6 +1,6 @@
 # Adding a New AI Assistant
 
-This guide describes the minimal steps required to wire a new assistant into the internal `specify` CLI. Every change lives inside `src/specify_cli` and the bundled data directory.
+This guide describes the minimal steps required to wire a new assistant into the internal `specify` CLI. Every change lives inside `src/specify_cli` and the root-level asset folders (`templates/`, `scripts/`, `memory/`).
 
 ## 1. Register the Assistant
 
@@ -29,12 +29,12 @@ The CLI help text automatically reflects the keys in `AGENT_CONFIG`, but update 
 
 ## 2. Provide Command Templates
 
-Add prompts under `src/specify_cli/data/templates/commands/`. Each template is copied into the workspace during `specify init` and rendered per agent.
+Add prompts under `templates/commands/`. Each template is copied into the workspace during `specify init` and rendered per agent.
 
 Typical naming convention:
 
 ```
-src/specify_cli/data/templates/commands/specify.<flow>.md
+templates/commands/specify.<flow>.md
 ```
 
 Inside the template, make sure you reference the workspace paths:

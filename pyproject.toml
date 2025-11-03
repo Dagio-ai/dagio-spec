@@ -21,9 +21,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/specify_cli"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"templates" = "specify_cli/templates"
+"scripts" = "specify_cli/scripts"
+"memory" = "specify_cli/memory"
+
 [tool.hatch.build.targets.sdist]
-include = ["src/specify_cli/data/**"]
+include = ["templates/**", "scripts/**", "memory/**", "src/specify_cli/**"]
 
 [tool.hatch.build]
-include = ["src/specify_cli/data/**"]
- 
+include = ["templates/**", "scripts/**", "memory/**"]

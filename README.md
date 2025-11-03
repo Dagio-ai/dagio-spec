@@ -137,9 +137,9 @@ Treat the JSON as the single source of truth - manual edits to Markdown should b
 ### Repository Layout
 
 - `src/specify_cli/` - CLI implementation and bundled assets
-  - `data/templates/` - spec, plan, tasks, checklist, architecture templates
-  - `data/scripts/` - bash / PowerShell helpers copied into `.specify/scripts/`
-  - `data/memory/` - constitution and long-lived references
+- `templates/` - spec, plan, tasks, checklist, architecture templates copied into workspaces
+- `scripts/` - bash / PowerShell helpers copied into `.specify/scripts/`
+- `memory/` - constitution and long-lived references
 - `specs/` - feature specs, plans, tasks, and `architecture/` model outputs
 
 ---
@@ -147,5 +147,5 @@ Treat the JSON as the single source of truth - manual edits to Markdown should b
 ## Support
 
 - **Questions / Issues**: open a thread in the internal Specify channel
-- **Agent additions**: update `src/specify_cli/data/templates/commands/` and `src/specify_cli/__init__.py` (`AGENT_CONFIG`) with the new assistant metadata
+- **Agent additions**: update `templates/commands/` and `src/specify_cli/__init__.py` (`AGENT_CONFIG`) with the new assistant metadata
 - **Bug reports**: capture the failing command, stack traces with `--debug`, and attach the relevant files from `.specify/` or `specs/`
