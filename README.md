@@ -26,10 +26,10 @@ Specify is designed for internal distribution. Point `uv` at the repository you 
 
 ```bash
 # persistent install
-uv tool install --from path/to/spec-kit specify-cli
+uv tool install --from path/to/specify specify-cli
 
 # one-off invocation
-uvx --from path/to/spec-kit specify init
+uvx --from path/to/specify specify init
 ```
 
 The CLI requires Python 3.11+ and `uv`. Optional agent CLIs (Claude, Gemini, Codex, etc.) are detected automatically unless you pass `--ignore-agent-tools`.
@@ -128,7 +128,7 @@ Treat the JSON as the single source of truth - manual edits to Markdown should b
 | Argument / Option | Description |
 |-------------------|-------------|
 | `target` | Workspace directory to seed (defaults to `.`) |
-| `--ai` | Assistant to tailor commands for (claude, gemini, copilot, cursor-agent, qwen, opencode, codex, windsurf, kilocode, auggie, roo, codebuddy, amp, q) |
+| `--ai` | Assistant to tailor commands for (claude, gemini, copilot, cursor-agent, qwen, opencode, codex, windsurf, kilocode, auggie, roo, codebuddy, new-agent-cli, amp, q) |
 | `--script` | Script flavour: `sh` or `ps` |
 | `--ignore-agent-tools` | Skip CLI detection for assistant tooling |
 | `--force` | Overwrite existing `.specify/` assets without prompting |

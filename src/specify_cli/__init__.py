@@ -127,6 +127,13 @@ AGENT_CONFIG = {
         "requires_cli": True,
     },
 
+    "new-agent-cli": {
+        "name": "New Agent",
+        "folder": ".newagent/",
+        "install_url": "https://example.internal/new-agent",
+        "requires_cli": True,
+    },
+
     "roo": {
         "name": "Roo Code",
         "folder": ".roo/",
@@ -2125,6 +2132,8 @@ AGENT_OUTPUT_CONFIG = {
 
     "codebuddy": {"subdir": "commands", "extension": "md", "args_token": "$ARGUMENTS"},
 
+    "new-agent-cli": {"subdir": "commands", "extension": "md", "args_token": "$ARGUMENTS"},
+
     "amp": {"subdir": "commands", "extension": "md", "args_token": "$ARGUMENTS"},
 
     "q": {"subdir": "prompts", "extension": "md", "args_token": "$ARGUMENTS"},
@@ -2307,6 +2316,16 @@ def prepare_workspace(project_path: Path, agent_key: str, script_type: str, *, f
     if tracker:
 
         tracker.complete('copy-templates', 'templates')
+
+    try:
+        readme_src = _asset_path("README.md")
+    except FileNotFoundError:
+        readme_src = None
+
+    if readme_src and readme_src.exists():
+        target_readme = specify_dir / "README.md"
+        if force or not target_readme.exists():
+            shutil.copy2(readme_src, target_readme)
 
     ensure_architecture_templates(project_path)
 
