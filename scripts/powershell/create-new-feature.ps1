@@ -153,8 +153,22 @@ if ($Number -eq 0) {
     $Number = Get-NextFeatureNumber -ShortName $branchSuffix -SpecsDir $specsDir
 }
 
-$featureNum = ('{0:000}' -f $Number)
-$branchName = "$featureNum-$branchSuffix"
+if ($Number -lt 1) {
+    $Number = 1
+}
+
+while ($true) {
+    $candidate = ('{0:000}' -f $Number)
+    $candidateName = "$candidate-$branchSuffix"
+    $candidatePath = Join-Path $specsDir $candidateName
+    if (-not (Test-Path $candidatePath)) {
+        $featureNum = $candidate
+        $branchName = $candidateName
+        break
+    }
+
+    $Number += 1
+}
 
 # Enforce a 244-byte limit on feature identifiers to keep tooling compatibility
 # Validate and truncate if necessary

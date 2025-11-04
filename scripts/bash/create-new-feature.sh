@@ -111,12 +111,6 @@ check_existing_branches() {
         echo $((max_global + 1))
     fi
 }
-    if [ "$max_same" -gt 0 ]; then
-        echo $((max_same + 1))
-    else
-        echo $((max_global + 1))
-    fi
-}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 REPO_ROOT="$(find_repo_root "$SCRIPT_DIR")"
@@ -191,7 +185,23 @@ if [ -z "$BRANCH_NUMBER" ]; then
     BRANCH_NUMBER=$(check_existing_branches "$BRANCH_SUFFIX")
 fi
 
-FEATURE_NUM=$(printf "%03d" "$BRANCH_NUMBER")
+if ! [[ "$BRANCH_NUMBER" =~ ^[0-9]+$ ]]; then
+    BRANCH_NUMBER=0
+fi
+
+if [ "$BRANCH_NUMBER" -lt 1 ]; then
+    BRANCH_NUMBER=1
+fi
+
+while :; do
+    FEATURE_NUM=$(printf "%03d" "$BRANCH_NUMBER")
+    candidate_path="$SPECS_DIR/${FEATURE_NUM}-${BRANCH_SUFFIX}"
+    if [ ! -d "$candidate_path" ]; then
+        break
+    fi
+    BRANCH_NUMBER=$((BRANCH_NUMBER + 1))
+done
+
 BRANCH_NAME="${FEATURE_NUM}-${BRANCH_SUFFIX}"
 
 # Enforce a 244-byte limit on feature identifiers to keep tooling compatibility
